@@ -66,7 +66,7 @@ window.REFIND = {
         "background": "automata"
       },
       "magikarp": {
-        "background": "magikarp"
+        "background": "magikarp-moon"
       }
     },
     "icons": {
