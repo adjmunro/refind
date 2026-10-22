@@ -69,6 +69,10 @@ THEMES = {
         glyph="#4b473c", shade=("#d4cfba", 0.45), alpha=0.95, shadow=None,
         mark=("brackets", "#4b473c", 0.90), small=("box", "#4b473c", 0.14),
     ),
+    "magikarp": dict(
+        glyph="#fffaf0", shade=("#0b3a66", 0.35), alpha=0.96, shadow=("#04213d", 0.55, 1.2, 1),
+        mark=("bar", "#ffcf4a", 0.95), small=("disc", "#ffffff", 0.22),
+    ),
 }
 
 

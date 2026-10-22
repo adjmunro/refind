@@ -10,7 +10,8 @@
       "ambience",
       "sublime",
       "synthwave",
-      "automata"
+      "automata",
+      "magikarp"
     ]
   },
   "theme": "minimal",
@@ -29,6 +30,9 @@
     },
     "automata": {
       "background": "automata"
+    },
+    "magikarp": {
+      "background": "magikarp"
     }
   },
   "icons": {

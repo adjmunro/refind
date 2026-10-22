@@ -44,7 +44,8 @@ window.REFIND = {
         "ambience",
         "sublime",
         "synthwave",
-        "automata"
+        "automata",
+        "magikarp"
       ]
     },
     "theme": "minimal",
@@ -63,6 +64,9 @@ window.REFIND = {
       },
       "automata": {
         "background": "automata"
+      },
+      "magikarp": {
+        "background": "magikarp"
       }
     },
     "icons": {
@@ -86,6 +90,9 @@ window.REFIND = {
     },
     "automata": {
       "text": "black"
+    },
+    "magikarp": {
+      "text": "white"
     },
     "synthwave": {
       "text": "white"

@@ -11,6 +11,8 @@
 #   /etc/polkit-1/rules.d/50-refind-manager.rules   lets the repo owner start
 #                                                   refind-esp-sync.service without a password
 #   /etc/refind-manager.conf                        where the repo is and who owns it
+#   tailscale serve on port 80                      http://<this machine's tailnet name>/
+#                                                   proxies to the configurator (tailnet only)
 #
 # Uninstall: scripts/install-system.sh --uninstall
 set -euo pipefail
@@ -24,6 +26,7 @@ die() { echo "install-system: $*" >&2; exit 1; }
 [[ $EUID -eq 0 ]] || die "needs root (the launcher uses pkexec; or: sudo $0)"
 
 if [[ ${1:-} == --uninstall ]]; then
+    tailscale serve --http=80 off 2>/dev/null || true
     systemctl disable refind-theme-rotate.service 2>/dev/null || true
     rm -f /etc/systemd/system/refind-esp-sync.service /etc/systemd/system/refind-theme-rotate.service \
         "$RULE" /etc/refind-manager.conf /usr/local/bin/refind-theme
@@ -47,4 +50,12 @@ chmod 0644 /etc/refind-manager.conf
 
 systemctl daemon-reload
 systemctl enable refind-theme-rotate.service >/dev/null 2>&1
+
+# Tailnet-only web address with no port: tailscaled listens on port 80 of this
+# machine's Tailscale IP and proxies to the configurator on localhost. Persisted
+# by tailscaled across reboots; harmless while the configurator isn't running.
+if command -v tailscale >/dev/null; then
+    tailscale serve --bg --http=80 http://127.0.0.1:8765 >/dev/null \
+        || echo "warning: couldn't set up tailscale serve; use http://<tailscale-ip>:8765/ instead" >&2
+fi
 echo "Installed refind-manager system parts for $OWNER (repo $REPO)."

@@ -44,11 +44,12 @@ gio set -t string "$REPO/rEFInd Manager.desktop" metadata::xfce-exe-checksum \
 if [[ $(scripts/system-version.sh) != "$(cat /usr/local/lib/refind-manager/VERSION 2>/dev/null)" ]]; then
     if [[ -n ${DISPLAY:-}${WAYLAND_DISPLAY:-} ]] && command -v pkexec >/dev/null; then
         zenity --info --no-wrap --title "rEFInd Manager" --text \
-"One-time setup needs your password.
+"Setup needs your password (first run, or after an update to it).
 
 It installs a small root service that copies this repo's boot menu onto
-the EFI partition, and lets your user start that one service without a
-password, so Save can update the boot menu.
+the EFI partition, lets your user start that one service without a
+password so Save can update the boot menu, and puts this page on your
+tailnet at http://$(hostname | tr 'A-Z' 'a-z')/ with no port.
 
 Details: scripts/install-system.sh" 2>/dev/null || true
         if pkexec "$REPO/scripts/install-system.sh"; then
@@ -62,20 +63,27 @@ Details: scripts/install-system.sh" 2>/dev/null || true
 fi
 
 # 3. (Re)start the server, so it runs the code we just pulled.
-IP=$(tailscale ip -4 2>/dev/null | head -n1)
-IP=${IP:-127.0.0.1}
-URL="http://$IP:$PORT/"
+LOCAL="http://127.0.0.1:$PORT/"
 systemctl --user stop refind-manager 2>/dev/null || true
 systemctl --user reset-failed refind-manager 2>/dev/null || true
 systemd-run --user --unit=refind-manager --collect --quiet --working-directory="$REPO" \
-    python3 "$REPO/src/serve.py" --host "$IP" --port "$PORT"
+    python3 "$REPO/src/serve.py" --port "$PORT"
 for _ in $(seq 20); do
-    curl -fsS -m 1 "${URL}api/ping" >/dev/null 2>&1 && break
+    curl -fsS -m 1 "${LOCAL}api/ping" >/dev/null 2>&1 && break
     sleep 0.25
 done
-if ! curl -fsS -m 1 "${URL}api/ping" >/dev/null 2>&1; then
+if ! curl -fsS -m 1 "${LOCAL}api/ping" >/dev/null 2>&1; then
     say "The server didn't start. Logs: journalctl --user -u refind-manager"
     exit 1
+fi
+
+# The address to use: the tailnet name (via tailscale serve on port 80) when
+# that's set up, otherwise the Tailscale IP and port.
+NAME=$(tailscale status --json 2>/dev/null | python3 -c 'import json,sys; print(json.load(sys.stdin)["Self"]["DNSName"].split(".")[0])' 2>/dev/null)
+if [[ -n $NAME ]] && tailscale serve status 2>/dev/null | grep -q "^http://$NAME"; then
+    URL="http://$NAME/"
+else
+    URL="http://$(tailscale ip -4 2>/dev/null | head -n1):$PORT/"
 fi
 echo "rEFInd Manager: $URL"
 

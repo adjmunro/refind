@@ -3,8 +3,9 @@
 
     python3 src/serve.py [--host IP] [--port 8765]     (normally via scripts/refind-manager)
 
-Binds to this machine's Tailscale address by default, so the configurator is
-reachable from your own devices at http://<tailscale-ip>:8765/ and nowhere else.
+Binds to localhost and this machine's Tailscale address, nothing else. Your
+devices reach it at http://<tailnet name>/ through `tailscale serve` (set up by
+scripts/install-system.sh), or directly at http://<tailscale-ip>:8765/.
 
     GET  /api/state   config, git state, and what's deployed to the ESP
     POST /api/save    {config}: write src/config.json, build, commit, push,
@@ -162,10 +163,13 @@ def tailscale_ip():
 
 if __name__ == "__main__":
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    ap.add_argument("--host", default=None, help="address to bind (default: this machine's Tailscale IPv4)")
+    ap.add_argument("--host", action="append",
+                    help="address to bind; repeatable (default: 127.0.0.1, for tailscale serve, and the Tailscale IPv4)")
     ap.add_argument("--port", type=int, default=8765)
     args = ap.parse_args()
-    host = args.host or tailscale_ip()
-    server = http.server.ThreadingHTTPServer((host, args.port), Handler)
-    print(f"Serving {ROOT} on http://{host}:{args.port}/", flush=True)
-    server.serve_forever()
+    hosts = args.host or sorted({"127.0.0.1", tailscale_ip()})
+    servers = [http.server.ThreadingHTTPServer((h, args.port), Handler) for h in hosts]
+    for s in servers[1:]:
+        threading.Thread(target=s.serve_forever, daemon=True).start()
+    print(f"Serving {ROOT} on " + ", ".join(f"http://{h}:{args.port}/" for h in hosts), flush=True)
+    servers[0].serve_forever()

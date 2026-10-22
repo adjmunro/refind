@@ -5,7 +5,7 @@ Instructions for any AI agent (Claude Code, Codex, etc.) working in this repo.
 ## What this is
 
 The rEFInd boot menu for **magikarp**, a CachyOS desktop that triple-boots
-CachyOS, Windows and Linux Mint: config, five themes, and **rEFInd Manager**,
+CachyOS, Windows and Linux Mint: config, six themes, and **rEFInd Manager**,
 a self-contained configurator. The repo lives at `/data/repos/refind` on
 magikarp and is pushed to github.com/adjmunro/refind.
 
@@ -15,15 +15,18 @@ The user configures everything in the browser, never the terminal:
    ask an agent to start it. `scripts/refind-manager` fetches + fast-forwards,
    installs/updates the system parts if needed (one pkexec password dialog),
    (re)starts the server and opens the page.
-2. The page is at **http://100.70.83.116:8765/** (magikarp's Tailscale IP) from
-   any of the user's devices. Use the IP, not `magikarp`: the user's browsers
-   (Helium, Zen) use DNS-over-HTTPS and can't resolve Tailscale names.
+2. The page is at **http://magikarp/** from any of the user's devices:
+   `tailscale serve` (set up by `install-system.sh`) proxies port 80 on the
+   tailnet to the server on 127.0.0.1:8765. The user wants the name, never an
+   IP or port. Their browsers (Helium, Zen) do DNS-over-HTTPS, so they need
+   Tailscale names exempted to resolve it (see README). The Tailscale IP with
+   port 8765 still works as a fallback.
 3. **Save & apply** writes `src/config.json`, builds, commits, pushes, then
    starts `refind-esp-sync.service`, which copies the build onto the ESP.
 
 When the user asks you to "spin it up" from another machine:
-`ssh magikarp /data/repos/refind/scripts/refind-manager --no-open`, then open
-http://100.70.83.116:8765/ in their browser (on macOS: `open <url>`).
+`ssh magikarp /data/repos/refind/scripts/refind-manager --no-open` (it prints
+the URL), then open it in their browser (on macOS: `open <url>`).
 
 The ESP is **not** a git checkout on purpose (FAT32, root-only, shared with the
 CachyOS kernels). It gets only runtime files, and `/boot/EFI/refind/DEPLOYED`
@@ -73,7 +76,7 @@ approves the password prompt. Tell them.
 | `src/build.py` | Builds `refind.conf` and `themes/*` from config. Theme palettes (`THEMES`) and the background library (`BACKGROUNDS`) live here. |
 | `src/refind.conf.in` | Template for `refind.conf` (`@TIMEOUT@`, `@DEFAULT@`). |
 | `entries.conf` | The boot entries. `{theme}` in icon paths becomes the active theme's name. |
-| `src/backgrounds/` | Generated backgrounds (`src/tools/gen_backgrounds.py`: synthwave, automata). |
+| `src/backgrounds/` | Generated backgrounds (`src/tools/gen_backgrounds.py`: synthwave, automata, magikarp). |
 | `src/icons/`, `src/candidates/` | Our icon masters, and every candidate per slot (`src/tools/fetch_candidates.py`, provenance in `SOURCES.md`). |
 | `preview/index.html` | The configurator page. |
 | `src/serve.py` | Its server: static files + `/api/state` + `/api/save`. Binds the Tailscale IP only. |
