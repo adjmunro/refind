@@ -48,8 +48,7 @@ if [[ $(scripts/system-version.sh) != "$(cat /usr/local/lib/refind-manager/VERSI
 
 It installs a small root service that copies this repo's boot menu onto
 the EFI partition, lets your user start that one service without a
-password so Save can update the boot menu, and puts this page on your
-tailnet at http://$(hostname | tr 'A-Z' 'a-z')/ with no port.
+password so Save can update the boot menu.
 
 Details: scripts/install-system.sh" 2>/dev/null || true
         if pkexec "$REPO/scripts/install-system.sh"; then
@@ -77,14 +76,10 @@ if ! curl -fsS -m 1 "${LOCAL}api/ping" >/dev/null 2>&1; then
     exit 1
 fi
 
-# The address to use: the tailnet name (via tailscale serve on port 80) when
-# that's set up, otherwise the Tailscale IP and port.
+# The address to use: this machine's tailnet name (port 80 belongs to the
+# magikarp home page, which links here).
 NAME=$(tailscale status --json 2>/dev/null | python3 -c 'import json,sys; print(json.load(sys.stdin)["Self"]["DNSName"].split(".")[0])' 2>/dev/null)
-if [[ -n $NAME ]] && tailscale serve status 2>/dev/null | grep -q "^http://$NAME"; then
-    URL="http://$NAME/"
-else
-    URL="http://$(tailscale ip -4 2>/dev/null | head -n1):$PORT/"
-fi
+URL="http://${NAME:-$(tailscale ip -4 2>/dev/null | head -n1)}:$PORT/"
 echo "rEFInd Manager: $URL"
 
 # 4. Open it.

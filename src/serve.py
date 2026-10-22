@@ -3,9 +3,8 @@
 
     python3 src/serve.py [--host IP] [--port 8765]     (normally via scripts/refind-manager)
 
-Binds to localhost and this machine's Tailscale address, nothing else. Your
-devices reach it at http://<tailnet name>/ through `tailscale serve` (set up by
-scripts/install-system.sh), or directly at http://<tailscale-ip>:8765/.
+Binds to localhost and this machine's Tailscale address, nothing else, so your
+devices reach it at http://<tailnet name>:8765/ (port 80 is the magikarp home page).
 
     GET  /api/state   config, git state, and what's deployed to the ESP
     POST /api/save    {config}: write src/config.json, build, commit, push,
@@ -164,7 +163,7 @@ def tailscale_ip():
 if __name__ == "__main__":
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--host", action="append",
-                    help="address to bind; repeatable (default: 127.0.0.1, for tailscale serve, and the Tailscale IPv4)")
+                    help="address to bind; repeatable (default: 127.0.0.1 and the Tailscale IPv4)")
     ap.add_argument("--port", type=int, default=8765)
     args = ap.parse_args()
     hosts = args.host or sorted({"127.0.0.1", tailscale_ip()})

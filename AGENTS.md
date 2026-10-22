@@ -15,12 +15,12 @@ The user configures everything in the browser, never the terminal:
    ask an agent to start it. `scripts/refind-manager` fetches + fast-forwards,
    installs/updates the system parts if needed (one pkexec password dialog),
    (re)starts the server and opens the page.
-2. The page is at **http://magikarp/** from any of the user's devices:
-   `tailscale serve` (set up by `install-system.sh`) proxies port 80 on the
-   tailnet to the server on 127.0.0.1:8765. The user wants the name, never an
-   IP or port. Their browsers (Helium, Zen) do DNS-over-HTTPS, so they need
-   Tailscale names exempted to resolve it (see README). The Tailscale IP with
-   port 8765 still works as a fallback.
+2. The page is at **http://magikarp:8765/** from any of the user's devices
+   (the server binds localhost and the Tailscale IP only). Port 80 is the
+   separate magikarp home page service (/usr/local/lib/magikarp-home, not this
+   repo), which links here: never take over port 80. The user's browsers
+   (Helium, Zen) do DNS-over-HTTPS, so they need Tailscale names exempted to
+   resolve `magikarp` (see README).
 3. **Save & apply** writes `src/config.json`, builds, commits, pushes, then
    starts `refind-esp-sync.service`, which copies the build onto the ESP.
 
