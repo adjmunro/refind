@@ -3,20 +3,74 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>rEFInd Preview</title>
+<title>rEFInd Manager</title>
 <!--
-  A rough simulator of magikarp's rEFInd screen, drawn from the real theme files
-  in ../themes and the entries in ../entries.conf (via data.js, written by
-  src/build.py), plus an icon lab for trying every candidate in src/candidates.
-  Open it straight from disk, or run scripts/preview.sh to reach it from other
-  devices over Tailscale and get a Save button in the icon lab.
+  The configurator. Settings on the left, a live simulation of the boot menu on
+  the right, drawn from the real theme files. Served by src/serve.py (started by
+  scripts/refind-manager), Save writes src/config.json, rebuilds, commits, pushes
+  and updates the ESP. Opened from disk it still previews, read-only.
 
-  Keys: ←/→ move · ↑/↓ switch row · Enter "boot" · 1-9 pick theme
-        R simulate a reboot (rotates to the next theme) · L icon lab · H hide panels
+  Keys (outside inputs): ←/→ move · ↑/↓ row · Enter "boot" · 1-9 preview theme
+                         R simulate reboot · H hide the panel
 -->
 <style>
-  :root { color-scheme: dark; --panel: rgb(20 20 24 / 0.82); --text: #e8e8ea; --muted: #a8a8b0; --line: rgb(255 255 255 / 0.15); }
-  html, body { margin: 0; height: 100%; background: #000; overflow: hidden; font: 13px/1.4 system-ui, sans-serif; color: var(--text); }
+  :root {
+    color-scheme: dark;
+    --panel: rgb(18 18 22 / 0.92); --raise: rgb(255 255 255 / 0.06); --line: rgb(255 255 255 / 0.12);
+    --text: #ececef; --muted: #9d9da8; --accent: #4cc2ff; --ok: #5bd68a; --warn: #f5c451; --bad: #ff6b6b;
+    --w: 420px;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: #000; overflow: hidden; font: 13px/1.45 system-ui, sans-serif; color: var(--text); }
+  button, select, input { font: inherit; color: inherit; }
+  button { background: var(--raise); border: 1px solid var(--line); border-radius: 7px; padding: 5px 10px; cursor: pointer; }
+  button:hover:not(:disabled) { border-color: rgb(255 255 255 / 0.3); }
+  button:disabled { opacity: .45; cursor: default; }
+  button.on { background: var(--text); color: #111; border-color: var(--text); }
+  select, input[type=number] { background: rgb(0 0 0 / 0.35); border: 1px solid var(--line); border-radius: 7px; padding: 5px 8px; }
+  .hidden { display: none !important; }
+
+  #panel { position: fixed; inset: 0 auto 0 0; width: var(--w); background: var(--panel); border-right: 1px solid var(--line);
+           display: flex; flex-direction: column; z-index: 2; backdrop-filter: blur(12px); }
+  body.nopanel #panel { display: none; }
+  header { padding: 14px 16px 12px; border-bottom: 1px solid var(--line); }
+  header h1 { margin: 0; font-size: 15px; font-weight: 650; letter-spacing: .01em; }
+  header h1 small { color: var(--muted); font-weight: 400; }
+  #status { margin: 8px 0 10px; color: var(--muted); font-size: 12px; display: grid; gap: 2px; }
+  #status b { color: var(--text); font-weight: 500; }
+  #status .warn { color: var(--warn); } #status .bad { color: var(--bad); }
+  .actions { display: flex; gap: 8px; align-items: center; }
+  #save { background: var(--accent); color: #04121b; border: 0; font-weight: 650; padding: 8px 16px; }
+  #save:disabled { background: var(--raise); color: var(--muted); }
+  #discard { background: none; border: 0; color: var(--muted); text-decoration: underline; padding: 4px; }
+  #scroll { overflow-y: auto; padding: 4px 16px 24px; flex: 1; }
+  details { border-bottom: 1px solid var(--line); padding: 10px 0; }
+  summary { cursor: pointer; font-weight: 600; font-size: 12px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); list-style: none; }
+  summary::before { content: "▸ "; } details[open] summary::before { content: "▾ "; }
+  .field { display: grid; grid-template-columns: 120px 1fr; align-items: center; gap: 8px; margin: 10px 0; }
+  .field label { color: var(--muted); }
+  .hint { color: var(--muted); font-size: 12px; margin: 4px 0 0; }
+  .seg { display: inline-flex; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+  .seg button { border: 0; border-radius: 0; background: none; }
+  .seg button.on { background: var(--text); color: #111; }
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; }
+  .chip { display: inline-flex; gap: 6px; align-items: center; padding: 4px 9px; border: 1px solid var(--line); border-radius: 999px; cursor: pointer; user-select: none; }
+  .chip input { margin: 0; accent-color: var(--accent); }
+  .theme { margin: 12px 0 16px; }
+  .theme .top { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+  .theme .top b { font-weight: 600; } .theme .top .tag { color: var(--muted); font-size: 11px; }
+  .theme .top button { margin-left: auto; padding: 3px 8px; font-size: 12px; }
+  .bgs { display: grid; grid-template-columns: repeat(5, 1fr); gap: 5px; }
+  .bg { aspect-ratio: 16/9; border-radius: 5px; border: 2px solid transparent; background-size: cover; background-position: center; cursor: pointer; padding: 0; }
+  .bg.on { border-color: var(--accent); }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(58px, 1fr)); gap: 5px; padding: 7px; border-radius: 8px; background-size: cover; background-position: center; margin-top: 6px; }
+  .cand { aspect-ratio: 1; padding: 6px; display: grid; place-items: center; border-radius: 6px; background: none; border: 1px solid transparent; }
+  .cand.on { border: 2px solid var(--accent); background: rgb(76 194 255 / 0.12); }
+  .cand img { max-width: 100%; max-height: 100%; }
+  .slot { margin: 12px 0; } .slot .name { font: 11px ui-monospace, monospace; color: var(--muted); margin-top: 3px; }
+
+  #view { position: fixed; inset: 0 0 0 var(--w); overflow: hidden; }
+  body.nopanel #view { left: 0; }
   #stage { position: absolute; left: 50%; top: 50%; transform-origin: 0 0; background-size: cover; }
   .tile { position: absolute; cursor: pointer; }
   .tile .sel { position: absolute; inset: 0; background-size: 100% 100%; visibility: hidden; }
@@ -25,102 +79,107 @@
   #label { position: absolute; left: 0; right: 0; display: flex; justify-content: center; }
   #label span { display: block; background-repeat: no-repeat; }
   #label.white span { filter: invert(1); }
-  .panel { position: fixed; background: var(--panel); backdrop-filter: blur(10px); box-shadow: 0 4px 24px rgb(0 0 0 / 0.45); border-radius: 10px; }
-  .hidden { display: none !important; }
-  #hud { top: 12px; right: 12px; padding: 10px 12px; max-width: 300px; }
-  h1 { font-size: 13px; margin: 0 0 8px; font-weight: 600; }
-  h2 { font-size: 12px; margin: 14px 0 6px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; }
-  .row { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 8px; }
-  button { font: inherit; color: inherit; background: rgb(255 255 255 / 0.08); border: 1px solid var(--line); border-radius: 6px; padding: 4px 9px; cursor: pointer; }
-  button.on { background: var(--text); color: #111; }
-  p { margin: 0; color: var(--muted); font-size: 12px; }
-  #lab { top: 12px; left: 12px; bottom: 12px; width: 420px; padding: 12px 14px; overflow-y: auto; }
-  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(64px, 1fr)); gap: 6px; padding: 8px; border-radius: 8px; background-size: cover; background-position: center; }
-  .cand { aspect-ratio: 1; padding: 6px; display: grid; place-items: center; border-radius: 6px; background: rgb(0 0 0 / 0); border: 1px solid transparent; }
-  .cand:hover { border-color: rgb(255 255 255 / 0.5); }
-  .cand.on { border: 2px solid #4cc2ff; background: rgb(76 194 255 / 0.12); }
-  .cand img { max-width: 100%; max-height: 100%; }
-  .name { font: 11px ui-monospace, monospace; color: var(--muted); margin-top: 4px; min-height: 1.2em; }
-  pre { font: 11px/1.5 ui-monospace, monospace; background: rgb(0 0 0 / 0.35); padding: 8px; border-radius: 6px; user-select: all; white-space: pre-wrap; margin: 6px 0; }
-  #toast { position: fixed; left: 50%; bottom: 40px; transform: translateX(-50%); padding: 12px 16px; border-radius: 10px; background: var(--panel);
-           opacity: 0; transition: opacity .2s; pointer-events: none; font: 13px/1.5 ui-monospace, monospace; white-space: pre; }
+  #hud { position: absolute; left: 50%; bottom: 14px; transform: translateX(-50%); display: flex; gap: 6px; align-items: center;
+         padding: 6px 8px; border-radius: 10px; background: rgb(18 18 22 / 0.75); backdrop-filter: blur(8px); white-space: nowrap; }
+  #hud .sep { width: 1px; height: 18px; background: var(--line); margin: 0 2px; }
+  #toast { position: fixed; left: calc(50% + var(--w) / 2); bottom: 70px; transform: translateX(-50%); padding: 10px 14px; border-radius: 10px;
+           background: rgb(18 18 22 / 0.9); opacity: 0; transition: opacity .2s; pointer-events: none; font: 12px/1.5 ui-monospace, monospace; white-space: pre; z-index: 3; }
+  body.nopanel #toast { left: 50%; }
   #toast.show { opacity: 1; }
+  #modal { position: fixed; inset: 0; background: rgb(0 0 0 / 0.55); display: grid; place-items: center; z-index: 5; }
+  #modal .box { width: min(560px, 92vw); background: #17171c; border: 1px solid var(--line); border-radius: 12px; padding: 18px 20px; }
+  #modal h2 { margin: 0 0 12px; font-size: 15px; }
+  #steps { display: grid; gap: 8px; margin: 0 0 14px; }
+  .step { display: grid; grid-template-columns: 20px 1fr; gap: 6px; }
+  .step .i { font-weight: 700; } .step.ok .i { color: var(--ok); } .step.bad .i { color: var(--bad); }
+  .step pre { grid-column: 2; margin: 2px 0 0; font: 11px/1.45 ui-monospace, monospace; color: var(--muted); white-space: pre-wrap; max-height: 180px; overflow: auto; }
+  .spin { display: inline-block; width: 12px; height: 12px; border: 2px solid var(--line); border-top-color: var(--accent); border-radius: 50%; animation: s 0.8s linear infinite; }
+  @keyframes s { to { transform: rotate(360deg); } }
 </style>
 </head>
 <body>
-<div id="stage"></div>
-<div id="hud" class="panel">
-  <h1>rEFInd preview · magikarp</h1>
-  <div class="row" id="themes"></div>
-  <div class="row"><button id="reboot">Simulate reboot (rotate)</button><button id="labBtn">Icon lab</button></div>
-  <p>←/→ move · ↑/↓ row · Enter boot · 1–9 theme · R reboot · L lab · H hide</p>
-</div>
-<div id="lab" class="panel hidden">
-  <h1>Icon lab</h1>
-  <p>Click a candidate to try it. Each is trimmed, scaled and recoloured exactly as the real build does. Hover for its name.</p>
-  <h2>Tool button sets</h2>
-  <div class="row" id="sets"></div>
-  <div id="slots"></div>
-  <h2>Your picks</h2>
-  <pre id="out"></pre>
-  <div class="row">
-    <button id="save" class="hidden">Save to repo</button>
-    <button id="copy">Copy</button>
-    <button id="reset">Reset to current build</button>
+<aside id="panel">
+  <header>
+    <h1>rEFInd Manager <small>· magikarp</small></h1>
+    <div id="status">Loading…</div>
+    <div class="actions">
+      <button id="save" disabled>Save &amp; apply</button>
+      <button id="discard" class="hidden">Discard changes</button>
+    </div>
+  </header>
+  <div id="scroll">
+    <details open>
+      <summary>Boot</summary>
+      <div class="field"><label for="default">Default system</label><select id="default"></select></div>
+      <div class="field"><label for="timeout">Timeout (s)</label><input id="timeout" type="number" min="-1" max="120" step="1"></div>
+      <p class="hint">How long the menu waits before booting the default. 0 waits forever; −1 boots straight away unless you press a key.</p>
+    </details>
+    <details open>
+      <summary>Theme rotation</summary>
+      <div class="field"><label>On each boot</label>
+        <div class="seg" id="mode"><button data-v="off">Fixed</button><button data-v="next">In order</button><button data-v="random">Shuffle</button></div>
+      </div>
+      <div class="field" id="fixedRow"><label for="fixed">Theme</label><select id="fixed"></select></div>
+      <div id="poolRow"><p class="hint" style="margin:6px 0 8px">Themes in the rotation:</p><div class="chips" id="pool"></div></div>
+      <p class="hint">Rotation happens when CachyOS starts up, ready for the next boot.</p>
+    </details>
+    <details open>
+      <summary>Themes &amp; backgrounds</summary>
+      <div id="themes"></div>
+    </details>
+    <details>
+      <summary>Icons</summary>
+      <p class="hint">Shown in the theme you're previewing. Each candidate is trimmed, sized and recoloured exactly as the build does.</p>
+      <p class="hint" style="margin-top:10px">Bottom-row style sets:</p>
+      <div class="chips" id="sets" style="margin-top:6px"></div>
+      <div id="slots"></div>
+    </details>
   </div>
-  <p id="saveHint">Opened from disk: copy the picks into src/choices.json. Served by scripts/preview.sh, a Save button
-    writes them, rebuilds, commits and pushes.</p>
-</div>
+</aside>
+<main id="view">
+  <div id="stage"></div>
+  <div id="hud"></div>
+</main>
 <div id="toast"></div>
+<div id="modal" class="hidden"><div class="box"><h2 id="modalTitle">Saving</h2><div id="steps"></div>
+  <div class="actions"><button id="modalClose" class="hidden">Close</button></div></div></div>
 <script src="data.js"></script>
 <script>
 const D = window.REFIND;
+const $ = id => document.getElementById(id);
+const clone = o => JSON.parse(JSON.stringify(o));
 const TOOLS = [
-  { slot: "func_shutdown", title: "Shut Down Computer", action: "Power off" },
-  { slot: "func_reset", title: "Reboot Computer", action: "Restart" },
-  { slot: "func_firmware", title: "Reboot to Computer Setup Utility", action: "Restart into the UEFI firmware setup (\"BIOS\")" },
+  { slot: "func_shutdown", title: "Shut Down Computer", action: "power off" },
+  { slot: "func_reset", title: "Reboot Computer", action: "restart" },
+  { slot: "func_firmware", title: "Reboot to Computer Setup Utility", action: "restart into the UEFI firmware setup (\"BIOS\")" },
 ];
 const SLOT_TITLES = { os_cachyos: "CachyOS", os_win: "Windows", os_mint: "Linux Mint",
   func_shutdown: "Power off", func_reset: "Restart", func_firmware: "Firmware (BIOS)" };
-const names = Object.keys(D.themes);
-const stage = document.getElementById("stage");
+const MODE_NAMES = { off: "fixed", next: "in order", random: "shuffle" };
+
+let cfg = clone(D.config);
+const themeNames = Object.keys(cfg.themes);
 const params = new URLSearchParams(location.search);
-let theme = params.get("theme") || (D.themes.minimal ? "minimal" : names[0]);
-const choice = { ...D.choices };
-for (const s in choice) if (params.get(s) && D.candidates[s].includes(params.get(s))) choice[s] = params.get(s);
-let row = 0, col = 0;
+let view = { theme: themeNames.includes(params.get("theme")) ? params.get("theme") : cfg.theme, row: 0, col: 0 };
+let server = null;   // /api/state once loaded; null when opened from disk
 
-const iconSrc = (slot, id = choice[slot], t = theme) => `candidates/${t}/${slot}/${id}.png`;
+const dirty = () => JSON.stringify(cfg) !== JSON.stringify(D.config);
 
+/* ---------- stage ---------- */
 function fit() {
   const [W, H] = D.screen;
-  const s = Math.min(innerWidth / W, innerHeight / H);
-  Object.assign(stage.style, { width: W + "px", height: H + "px", transform: `scale(${s}) translate(-50%, -50%)` });
+  const v = $("view").getBoundingClientRect();
+  const s = Math.min(v.width / W, (v.height - 60) / H);
+  Object.assign($("stage").style, { width: W + "px", height: H + "px", transform: `scale(${s}) translate(-50%, -50%)`, marginTop: "-22px" });
 }
 
-function tile(x, y, size, iconSize, slot, selImg, on, onClick) {
-  const t = document.createElement("div");
-  t.className = "tile" + (on ? " on" : "");
-  Object.assign(t.style, { left: x + "px", top: y + "px", width: size + "px", height: size + "px" });
-  const sel = document.createElement("div");
-  sel.className = "sel";
-  sel.style.backgroundImage = `url(../themes/${theme}/${selImg})`;
-  const img = document.createElement("img");
-  img.src = iconSrc(slot);
-  const o = (size - iconSize) / 2;
-  Object.assign(img.style, { left: o + "px", top: o + "px", width: iconSize + "px", height: iconSize + "px" });
-  t.append(sel, img);
-  t.onclick = onClick;
-  return t;
-}
-
-function render() {
+function renderStage() {
   const [W, H] = D.screen;
-  const T = D.themes[theme];
+  const t = view.theme, bg = cfg.themes[t].background;
+  const stage = $("stage");
   stage.innerHTML = "";
-  stage.style.backgroundImage = `url(../themes/${theme}/background.png)`;
-  const yBig = Math.floor((H - (D.bigTile + 16 + D.smallTile)) / 2);
-  const ySmall = yBig + D.bigTile + 16;
+  stage.style.backgroundImage = `url(backgrounds/${bg}.jpg)`;
+  const yBig = Math.floor((H - (D.bigTile + 16 + D.smallTile)) / 2), ySmall = yBig + D.bigTile + 16;
   const rows = [
     { items: D.entries.map(e => ({ ...e, slot: e.icon })), y: yBig, size: D.bigTile, icon: D.big, sel: "selection_big.png" },
     { items: TOOLS, y: ySmall, size: D.smallTile, icon: D.small, sel: "selection_small.png" },
@@ -128,92 +187,201 @@ function render() {
   rows.forEach((r, ri) => {
     const width = r.items.length * r.size + (r.items.length - 1) * 8;
     r.items.forEach((item, ci) => {
+      const tile = document.createElement("div");
+      tile.className = "tile" + (ri === view.row && ci === view.col ? " on" : "");
       const x = Math.floor((W - width) / 2) + ci * (r.size + 8);
-      stage.append(tile(x, r.y, r.size, r.icon, item.slot, r.sel, ri === row && ci === col,
-        () => { row = ri; col = ci; render(); boot(); }));
+      Object.assign(tile.style, { left: x + "px", top: r.y + "px", width: r.size + "px", height: r.size + "px" });
+      const sel = document.createElement("div");
+      sel.className = "sel";
+      sel.style.backgroundImage = `url(../themes/${t}/${r.sel})`;
+      const img = document.createElement("img");
+      img.src = `candidates/${t}/${item.slot}/${cfg.icons[item.slot]}.png`;
+      const o = (r.size - r.icon) / 2;
+      Object.assign(img.style, { left: o + "px", top: o + "px", width: r.icon + "px", height: r.icon + "px" });
+      tile.append(sel, img);
+      tile.onclick = () => { view.row = ri; view.col = ci; renderStage(); boot(); };
+      stage.append(tile);
     });
   });
-  // Label of the selected item, drawn from the theme's bitmap font like rEFInd does.
   const label = document.createElement("div");
   label.id = "label";
-  label.className = T.text;
+  label.className = D.backgrounds[bg].text;
   label.style.top = ySmall + D.smallTile + 24 + "px";
-  const [cw, ch] = T.cell;
-  for (const c of rows[row].items[col].title) {
-    const code = c.charCodeAt(0);
-    const idx = code >= 32 && code <= 126 ? code - 32 : 95;
+  const [cw, ch] = D.cell;
+  for (const c of rows[view.row].items[view.col].title) {
+    const code = c.charCodeAt(0), idx = code >= 32 && code <= 126 ? code - 32 : 95;
     const s = document.createElement("span");
-    Object.assign(s.style, { width: cw + "px", height: ch + "px",
-      backgroundImage: `url(../themes/${theme}/font.png)`, backgroundPosition: `${-idx * cw}px 0` });
+    Object.assign(s.style, { width: cw + "px", height: ch + "px", backgroundImage: `url(../themes/${t}/font.png)`, backgroundPosition: `${-idx * cw}px 0` });
     label.append(s);
   }
   stage.append(label);
-  document.querySelectorAll("#themes button").forEach(b => b.classList.toggle("on", b.dataset.name === theme));
-  renderLab();
-  const q = new URLSearchParams({ theme });
-  for (const s in choice) if (choice[s] !== D.choices[s]) q.set(s, choice[s]);
-  history.replaceState(null, "", "?" + q);
+  renderHud();
+  history.replaceState(null, "", "?theme=" + t);
 }
 
-// Tool candidates grouped into matching sets: source prefix + weight, e.g. "phosphor-light".
+function renderHud() {
+  const hud = $("hud");
+  hud.innerHTML = "";
+  themeNames.forEach((n, i) => {
+    const b = document.createElement("button");
+    b.textContent = `${i + 1} ${n}`;
+    b.classList.toggle("on", n === view.theme);
+    b.onclick = () => { view.theme = n; renderAll(); };
+    hud.append(b);
+  });
+  const sep = document.createElement("span"); sep.className = "sep"; hud.append(sep);
+  const r = document.createElement("button"); r.textContent = "↻ Simulate reboot"; r.onclick = reboot; hud.append(r);
+  const h = document.createElement("button"); h.textContent = "☰"; h.title = "Hide/show settings (H)"; h.onclick = togglePanel; hud.append(h);
+}
+
+/* ---------- panel ---------- */
+function renderPanel() {
+  // Boot
+  const def = $("default");
+  def.innerHTML = D.entries.map(e => `<option${e.title === cfg.boot.default ? " selected" : ""}>${e.title}</option>`).join("");
+  def.onchange = () => { cfg.boot.default = def.value; changed(); };
+  const to = $("timeout");
+  to.value = cfg.boot.timeout;
+  to.oninput = () => { const v = parseInt(to.value, 10); if (!isNaN(v) && v >= -1 && v <= 120) { cfg.boot.timeout = v; changed(); } };
+
+  // Rotation
+  document.querySelectorAll("#mode button").forEach(b => {
+    b.classList.toggle("on", b.dataset.v === cfg.rotation.mode);
+    b.onclick = () => { cfg.rotation.mode = b.dataset.v; changed(); renderPanel(); };
+  });
+  const off = cfg.rotation.mode === "off";
+  $("fixedRow").classList.toggle("hidden", !off);
+  $("poolRow").classList.toggle("hidden", off);
+  const fixed = $("fixed");
+  fixed.innerHTML = themeNames.map(n => `<option${n === cfg.theme ? " selected" : ""}>${n}</option>`).join("");
+  fixed.onchange = () => { cfg.theme = fixed.value; view.theme = fixed.value; changed(); renderAll(); };
+  const pool = $("pool");
+  pool.innerHTML = "";
+  for (const n of themeNames) {
+    const lab = document.createElement("label");
+    lab.className = "chip";
+    const cb = document.createElement("input");
+    cb.type = "checkbox";
+    cb.checked = cfg.rotation.themes.includes(n);
+    cb.onchange = () => {
+      const set = new Set(cfg.rotation.themes);
+      cb.checked ? set.add(n) : set.delete(n);
+      if (!set.size) { cb.checked = true; return toast("Keep at least one theme in the rotation"); }
+      cfg.rotation.themes = themeNames.filter(x => set.has(x));
+      changed(); renderPanel();
+    };
+    lab.append(cb, document.createTextNode(n));
+    pool.append(lab);
+  }
+
+  // Themes & backgrounds
+  const themes = $("themes");
+  themes.innerHTML = "";
+  for (const n of themeNames) {
+    const box = document.createElement("div");
+    box.className = "theme";
+    const inUse = off ? n === cfg.theme : cfg.rotation.themes.includes(n);
+    box.innerHTML = `<div class="top"><b>${n}</b><span class="tag">${inUse ? (off ? "· the boot theme" : "· in rotation") : ""}</span></div>`;
+    const pv = document.createElement("button");
+    pv.textContent = n === view.theme ? "Previewing" : "Preview";
+    pv.disabled = n === view.theme;
+    pv.onclick = () => { view.theme = n; renderAll(); };
+    box.querySelector(".top").append(pv);
+    const bgs = document.createElement("div");
+    bgs.className = "bgs";
+    for (const bg of Object.keys(D.backgrounds)) {
+      const b = document.createElement("button");
+      b.className = "bg" + (cfg.themes[n].background === bg ? " on" : "");
+      b.style.backgroundImage = `url(backgrounds/${bg}.jpg)`;
+      b.title = bg;
+      b.onclick = () => { cfg.themes[n].background = bg; view.theme = n; changed(); renderAll(); };
+      bgs.append(b);
+    }
+    box.append(bgs);
+    themes.append(box);
+  }
+
+  // Icons
+  const sets = $("sets");
+  sets.innerHTML = "";
+  for (const k of toolSets) {
+    const b = document.createElement("button");
+    b.className = "chip";
+    b.textContent = k;
+    b.classList.toggle("on", TOOLS.every(t => setKey(cfg.icons[t.slot]) === k));
+    b.onclick = () => { for (const t of TOOLS) cfg.icons[t.slot] = D.candidates[t.slot].find(id => setKey(id) === k); changed(); renderAll(); };
+    sets.append(b);
+  }
+  const slots = $("slots");
+  slots.innerHTML = "";
+  for (const slot of Object.keys(D.candidates)) {
+    const wrap = document.createElement("div");
+    wrap.className = "slot";
+    wrap.innerHTML = `<b>${SLOT_TITLES[slot] || slot}</b>`;
+    const grid = document.createElement("div");
+    grid.className = "grid";
+    grid.style.backgroundImage = `url(backgrounds/${cfg.themes[view.theme].background}.jpg)`;
+    const name = document.createElement("div");
+    name.className = "name";
+    name.textContent = cfg.icons[slot];
+    for (const id of D.candidates[slot]) {
+      const b = document.createElement("button");
+      b.className = "cand" + (cfg.icons[slot] === id ? " on" : "");
+      b.title = id;
+      b.innerHTML = `<img loading="lazy" src="candidates/${view.theme}/${slot}/${id}.png" alt="">`;
+      b.onclick = () => { cfg.icons[slot] = id; changed(); renderAll(); };
+      b.onmouseenter = () => name.textContent = id;
+      b.onmouseleave = () => name.textContent = cfg.icons[slot];
+      grid.append(b);
+    }
+    wrap.append(grid, name);
+    slots.append(wrap);
+  }
+  renderStatus();
+}
+
+// Bottom-row candidates grouped into matching sets: source prefix + weight, e.g. "phosphor-light".
 const WEIGHTS = ["thin", "light", "bold", "fill", "duotone", "line"];
-const setKey = id => {
-  const parts = id.split("-");
-  const w = parts[parts.length - 1];
+function setKey(id) {
+  const parts = id.split("-"), w = parts[parts.length - 1];
   return parts[0] + (parts.length > 1 && WEIGHTS.includes(w) ? "-" + w : "");
-};
+}
 const toolSets = (() => {
   const per = TOOLS.map(t => new Set(D.candidates[t.slot].map(setKey)));
   return [...per[0]].filter(k => per.every(p => p.has(k)));
 })();
 
-function renderLab() {
-  const lab = document.getElementById("lab");
-  if (lab.classList.contains("hidden")) return;
-  const sets = document.getElementById("sets");
-  sets.innerHTML = "";
-  for (const k of toolSets) {
-    const b = document.createElement("button");
-    b.textContent = k;
-    b.classList.toggle("on", TOOLS.every(t => setKey(choice[t.slot]) === k));
-    b.onclick = () => { for (const t of TOOLS) choice[t.slot] = D.candidates[t.slot].find(id => setKey(id) === k); render(); };
-    sets.append(b);
+function renderStatus() {
+  const st = $("status"), save = $("save");
+  $("discard").classList.toggle("hidden", !dirty());
+  if (!server) {
+    st.innerHTML = `<span class="warn">Opened from disk: preview only. Start it with <b>rEFInd Manager</b> on magikarp to save.</span>`;
+    save.disabled = true;
+    return;
   }
-  const slots = document.getElementById("slots");
-  const scroll = lab.scrollTop;
-  slots.innerHTML = "";
-  for (const slot of Object.keys(D.candidates)) {
-    const h = document.createElement("h2");
-    h.textContent = SLOT_TITLES[slot] || slot;
-    const grid = document.createElement("div");
-    grid.className = "grid";
-    grid.style.backgroundImage = `url(../themes/${theme}/background.png)`;
-    const name = document.createElement("div");
-    name.className = "name";
-    name.textContent = choice[slot];
-    for (const id of D.candidates[slot]) {
-      const b = document.createElement("button");
-      b.className = "cand" + (choice[slot] === id ? " on" : "");
-      b.title = id;
-      const img = document.createElement("img");
-      img.src = iconSrc(slot, id);
-      b.append(img);
-      b.onclick = () => { choice[slot] = id; render(); };
-      b.onmouseenter = () => name.textContent = id;
-      b.onmouseleave = () => name.textContent = choice[slot];
-      grid.append(b);
-    }
-    slots.append(h, grid, name);
-  }
-  document.getElementById("out").textContent = JSON.stringify(choice, null, 2);
-  const dirty = Object.keys(choice).some(s => choice[s] !== D.choices[s]);
-  document.getElementById("save").disabled = !dirty;
-  lab.scrollTop = scroll;
+  const { git, system } = server;
+  const deployed = (system.deployed || "").match(/^commit\s+(\S+)/);
+  const deployedHash = deployed ? deployed[1] : null;
+  const headHash = git.head.split(" ")[0];
+  const pending = system.current && deployedHash !== headHash;
+  const lines = [];
+  lines.push(deployedHash
+    ? `Boot menu: <b>${deployedHash}</b>${system.active ? ` · showing <b>${system.active}</b> next boot` : ""}${pending ? ` <span class="warn">· behind the repo</span>` : ""}`
+    : `Boot menu: <span class="warn">not deployed from this repo yet</span>`);
+  lines.push(`Repo: <b>${git.head}</b>${git.behind ? ` <span class="warn">· ${git.behind} behind GitHub</span>` : ""}${git.ahead ? ` <span class="warn">· ${git.ahead} unpushed</span>` : ""}${git.dirty ? ` <span class="warn">· uncommitted files</span>` : ""}`);
+  if (!system.current) lines.push(`<span class="bad">${system.installed ? "System parts out of date" : "One-time setup needed"}: double-click rEFInd Manager on magikarp and approve the password prompt. Saving still commits and pushes.</span>`);
+  st.innerHTML = lines.map(l => `<div>${l}</div>`).join("");
+  save.disabled = !(dirty() || pending);
+  save.textContent = dirty() ? "Save & apply" : "Apply to boot menu";
 }
 
+function changed() { renderStatus(); }
+function renderAll() { renderPanel(); renderStage(); }
+
+/* ---------- actions ---------- */
 let toastTimer;
 function toast(msg) {
-  const el = document.getElementById("toast");
+  const el = $("toast");
   el.textContent = msg;
   el.classList.add("show");
   clearTimeout(toastTimer);
@@ -221,81 +389,79 @@ function toast(msg) {
 }
 
 function boot() {
-  if (row === 0) {
-    const e = D.entries[col];
+  if (view.row === 0) {
+    const e = D.entries[view.col];
     toast(`Would boot ${e.title}\n  loader ${e.loader}\n  volume ${e.volume}`);
-  } else {
-    toast(`Would ${TOOLS[col].action.charAt(0).toLowerCase() + TOOLS[col].action.slice(1)}`);
-  }
+  } else toast(`Would ${TOOLS[view.col].action}`);
 }
 
-function setTheme(name) { theme = name; render(); }
 function reboot() {
-  theme = names[(names.indexOf(theme) + 1) % names.length];
-  row = 0; col = 0; render();
-  toast(`Rebooted → theme "${theme}"`);
+  const r = cfg.rotation;
+  let next = cfg.theme;
+  if (r.mode !== "off") {
+    const pool = r.themes;
+    if (r.mode === "next") next = pool[(pool.indexOf(view.theme) + 1) % pool.length];
+    else { const others = pool.filter(t => t !== view.theme); next = others.length ? others[Math.floor(Math.random() * others.length)] : pool[0]; }
+  }
+  view = { theme: next, row: 0, col: 0 };
+  renderAll();
+  toast(`Rebooted (${MODE_NAMES[r.mode]}) → ${next}`);
 }
-function toggleLab() { document.getElementById("lab").classList.toggle("hidden"); renderLab(); }
 
-names.forEach((n, i) => {
-  const b = document.createElement("button");
-  b.textContent = `${i + 1} ${n}`;
-  b.dataset.name = n;
-  b.onclick = () => setTheme(n);
-  document.getElementById("themes").append(b);
-});
-document.getElementById("reboot").onclick = reboot;
-document.getElementById("labBtn").onclick = toggleLab;
-document.getElementById("reset").onclick = () => { Object.assign(choice, D.choices); render(); };
-document.getElementById("copy").onclick = async () => {
-  try { await navigator.clipboard.writeText(document.getElementById("out").textContent); toast("Copied"); }
-  catch { toast("Select the text above and copy it"); }
-};
+function togglePanel() { document.body.classList.toggle("nopanel"); fit(); }
 
-// Save is only possible when served by src/serve.py.
-if (location.protocol.startsWith("http")) {
-  fetch("/api/ping").then(r => r.ok && r.json()).then(j => {
-    if (!j || !j.save) return;
-    document.getElementById("save").classList.remove("hidden");
-    document.getElementById("saveHint").textContent =
-      "Save writes src/choices.json on magikarp, rebuilds every theme, then commits and pushes.";
-  }).catch(() => {});
-}
-document.getElementById("save").onclick = async () => {
-  const b = document.getElementById("save");
-  b.disabled = true;
-  b.textContent = "Saving…";
+$("discard").onclick = () => { cfg = clone(D.config); renderAll(); };
+$("modalClose").onclick = () => $("modal").classList.add("hidden");
+$("save").onclick = async () => {
+  const steps = $("steps");
+  $("modalTitle").textContent = "Saving";
+  steps.innerHTML = `<div class="step"><span class="spin"></span><span>Syncing, building every theme, committing, pushing and updating the boot menu… (about 15 s)</span></div>`;
+  $("modalClose").classList.add("hidden");
+  $("modal").classList.remove("hidden");
   try {
-    const r = await fetch("/api/choices", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(choice) });
+    const r = await fetch("/api/save", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(cfg) });
     const j = await r.json();
     if (!r.ok) throw new Error(j.error || r.status);
-    toast("Saved: " + j.log.join(" · "));
-    setTimeout(() => { location.href = location.pathname + "?theme=" + theme; }, 1800);
+    steps.innerHTML = "";
+    for (const s of j.steps) {
+      const el = document.createElement("div");
+      el.className = "step " + (s.ok ? "ok" : "bad");
+      el.innerHTML = `<span class="i">${s.ok ? "✓" : "✗"}</span><span>${s.step}</span>`;
+      if (s.detail) { const pre = document.createElement("pre"); pre.textContent = s.detail; el.append(pre); }
+      steps.append(el);
+    }
+    $("modalTitle").textContent = j.ok ? `Saved and applied (${j.seconds} s)` : "Saved with problems";
+    if (j.ok) setTimeout(() => location.reload(), 1600);
+    else $("modalClose").classList.remove("hidden");
   } catch (err) {
-    toast("Save failed: " + err.message);
-    b.disabled = false;
-    b.textContent = "Save to repo";
+    steps.innerHTML = `<div class="step bad"><span class="i">✗</span><span>${err.message}</span></div>`;
+    $("modalTitle").textContent = "Save failed";
+    $("modalClose").classList.remove("hidden");
   }
 };
 
 addEventListener("keydown", e => {
+  if (e.target.closest("input, select, textarea")) return;
   const len = r => (r === 0 ? D.entries : TOOLS).length;
-  if (e.key === "ArrowRight") col = (col + 1) % len(row);
-  else if (e.key === "ArrowLeft") col = (col - 1 + len(row)) % len(row);
-  else if (e.key === "ArrowDown" || e.key === "ArrowUp") { row = 1 - row; col = Math.min(col, len(row) - 1); }
+  if (e.key === "ArrowRight") view.col = (view.col + 1) % len(view.row);
+  else if (e.key === "ArrowLeft") view.col = (view.col - 1 + len(view.row)) % len(view.row);
+  else if (e.key === "ArrowDown" || e.key === "ArrowUp") { view.row = 1 - view.row; view.col = Math.min(view.col, len(view.row) - 1); }
   else if (e.key === "Enter") return boot();
   else if (e.key === "r" || e.key === "R") return reboot();
-  else if (e.key === "l" || e.key === "L") return toggleLab();
-  else if (e.key === "h" || e.key === "H") { document.getElementById("hud").classList.toggle("hidden"); document.getElementById("lab").classList.add("hidden"); return; }
-  else if (/^[1-9]$/.test(e.key) && names[+e.key - 1]) return setTheme(names[+e.key - 1]);
+  else if (e.key === "h" || e.key === "H") return togglePanel();
+  else if (/^[1-9]$/.test(e.key) && themeNames[+e.key - 1]) { view.theme = themeNames[+e.key - 1]; return renderAll(); }
   else return;
   e.preventDefault();
-  render();
+  renderStage();
 });
 addEventListener("resize", fit);
-if (!D.themes[theme]) theme = names[0];
+addEventListener("beforeunload", e => { if (dirty() && $("modal").classList.contains("hidden")) e.preventDefault(); });
+
 fit();
-render();
+renderAll();
+if (location.protocol.startsWith("http")) {
+  fetch("/api/state").then(r => r.ok ? r.json() : null).then(s => { server = s; renderStatus(); }).catch(() => renderStatus());
+}
 </script>
 </body>
 </html>

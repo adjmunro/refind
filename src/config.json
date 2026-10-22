@@ -1,0 +1,42 @@
+{
+  "boot": {
+    "timeout": 10,
+    "default": "CachyOS"
+  },
+  "rotation": {
+    "mode": "random",
+    "themes": [
+      "minimal",
+      "ambience",
+      "sublime",
+      "synthwave",
+      "automata"
+    ]
+  },
+  "theme": "minimal",
+  "themes": {
+    "minimal": {
+      "background": "minimal"
+    },
+    "ambience": {
+      "background": "ambience"
+    },
+    "sublime": {
+      "background": "sublime"
+    },
+    "synthwave": {
+      "background": "synthwave"
+    },
+    "automata": {
+      "background": "automata"
+    }
+  },
+  "icons": {
+    "os_cachyos": "system-cachyos.hello",
+    "os_win": "ambience-os_win",
+    "os_mint": "phosphor-plant-fill",
+    "func_shutdown": "remix-shut-down-line",
+    "func_reset": "lucide-refresh-cw",
+    "func_firmware": "bootstrap-cpu-fill"
+  }
+}

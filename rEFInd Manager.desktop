@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=rEFInd Manager
+Comment=Configure the boot menu: themes, backgrounds, rotation, icons
+Exec=sh -c 'exec "$(dirname "$1")/scripts/refind-manager"' sh %k
+Icon=preferences-system
+Terminal=false
+Categories=System;Settings;

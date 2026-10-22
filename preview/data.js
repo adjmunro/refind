@@ -8,6 +8,10 @@ window.REFIND = {
   "small": 48,
   "bigTile": 144,
   "smallTile": 64,
+  "cell": [
+    13,
+    29
+  ],
   "entries": [
     {
       "title": "CachyOS",
@@ -28,36 +32,64 @@ window.REFIND = {
       "volume": "fac9bf60-88c6-48fd-ba43-33268e15baf0"
     }
   ],
-  "themes": {
-    "ambience": {
-      "text": "white",
-      "cell": [
-        13,
-        29
+  "config": {
+    "boot": {
+      "timeout": 10,
+      "default": "CachyOS"
+    },
+    "rotation": {
+      "mode": "random",
+      "themes": [
+        "minimal",
+        "ambience",
+        "sublime",
+        "synthwave",
+        "automata"
       ]
     },
-    "minimal": {
-      "text": "black",
-      "cell": [
-        13,
-        29
-      ]
+    "theme": "minimal",
+    "themes": {
+      "minimal": {
+        "background": "minimal"
+      },
+      "ambience": {
+        "background": "ambience"
+      },
+      "sublime": {
+        "background": "sublime"
+      },
+      "synthwave": {
+        "background": "synthwave"
+      },
+      "automata": {
+        "background": "automata"
+      }
     },
-    "sublime": {
-      "text": "white",
-      "cell": [
-        13,
-        29
-      ]
+    "icons": {
+      "os_cachyos": "system-cachyos.hello",
+      "os_win": "ambience-os_win",
+      "os_mint": "phosphor-plant-fill",
+      "func_shutdown": "remix-shut-down-line",
+      "func_reset": "lucide-refresh-cw",
+      "func_firmware": "bootstrap-cpu-fill"
     }
   },
-  "choices": {
-    "os_cachyos": "system-cachyos.hello",
-    "os_win": "ambience-os_win",
-    "os_mint": "phosphor-plant-fill",
-    "func_shutdown": "remix-shut-down-line",
-    "func_reset": "lucide-refresh-cw",
-    "func_firmware": "bootstrap-cpu-fill"
+  "backgrounds": {
+    "minimal": {
+      "text": "black"
+    },
+    "ambience": {
+      "text": "white"
+    },
+    "sublime": {
+      "text": "white"
+    },
+    "automata": {
+      "text": "black"
+    },
+    "synthwave": {
+      "text": "white"
+    }
   },
   "candidates": {
     "os_cachyos": [

@@ -1,0 +1,86 @@
+#!/usr/bin/env bash
+# rEFInd Manager: the one entry point. Double-click "rEFInd Manager.desktop" in
+# the repo (or pick it from the applications menu) and it will:
+#
+#   1. fetch from GitHub and fast-forward, so you always start in sync
+#   2. install/update the system parts if needed (one graphical password prompt;
+#      skipped when there's no desktop session, e.g. started over ssh)
+#   3. (re)start the configurator server on the Tailscale address
+#   4. open the configurator in your browser
+#
+#   scripts/refind-manager [--no-open]     --no-open: start it without opening a browser
+#   systemctl --user stop refind-manager   stop the server
+set -uo pipefail
+
+REPO=$(cd "$(dirname "$(readlink -f "$0")")/.." && pwd)
+PORT=8765
+OPEN=1
+[[ ${1:-} == --no-open ]] && OPEN=0
+cd "$REPO" || exit 1
+
+say() {
+    echo "$*"
+    [[ -n ${DISPLAY:-}${WAYLAND_DISPLAY:-} ]] && notify-send -a "rEFInd Manager" -i preferences-system "rEFInd Manager" "$*" 2>/dev/null || true
+}
+
+# 1. Sync with GitHub.
+if ! git fetch -q 2>/dev/null; then
+    say "Couldn't reach GitHub; continuing with the local copy."
+elif [[ -n $(git status --porcelain) ]]; then
+    say "The repo has uncommitted changes, so it wasn't updated from GitHub."
+elif ! git merge --ff-only -q '@{u}' 2>/dev/null; then
+    say "Local commits differ from GitHub, so it wasn't fast-forwarded."
+fi
+
+# Keep the launchers working: an applications-menu entry for this checkout, and
+# XFCE's "trusted" mark on the repo's .desktop file (its checksum changes on update).
+mkdir -p ~/.local/share/applications
+sed "s|^Exec=.*|Exec=\"$REPO/scripts/refind-manager\"|" "$REPO/rEFInd Manager.desktop" \
+    > ~/.local/share/applications/refind-manager.desktop
+gio set -t string "$REPO/rEFInd Manager.desktop" metadata::xfce-exe-checksum \
+    "$(sha256sum "$REPO/rEFInd Manager.desktop" | cut -d' ' -f1)" 2>/dev/null || true
+
+# 2. System parts (root): needed for Save to update the boot menu.
+if [[ $(scripts/system-version.sh) != "$(cat /usr/local/lib/refind-manager/VERSION 2>/dev/null)" ]]; then
+    if [[ -n ${DISPLAY:-}${WAYLAND_DISPLAY:-} ]] && command -v pkexec >/dev/null; then
+        zenity --info --no-wrap --title "rEFInd Manager" --text \
+"One-time setup needs your password.
+
+It installs a small root service that copies this repo's boot menu onto
+the EFI partition, and lets your user start that one service without a
+password, so Save can update the boot menu.
+
+Details: scripts/install-system.sh" 2>/dev/null || true
+        if pkexec "$REPO/scripts/install-system.sh"; then
+            say "System setup done."
+        else
+            say "Setup skipped. Save will still commit and push, but won't update the boot menu."
+        fi
+    else
+        say "System setup pending: open rEFInd Manager on magikarp's desktop once to approve it."
+    fi
+fi
+
+# 3. (Re)start the server, so it runs the code we just pulled.
+IP=$(tailscale ip -4 2>/dev/null | head -n1)
+IP=${IP:-127.0.0.1}
+URL="http://$IP:$PORT/"
+systemctl --user stop refind-manager 2>/dev/null || true
+systemctl --user reset-failed refind-manager 2>/dev/null || true
+systemd-run --user --unit=refind-manager --collect --quiet --working-directory="$REPO" \
+    python3 "$REPO/src/serve.py" --host "$IP" --port "$PORT"
+for _ in $(seq 20); do
+    curl -fsS -m 1 "${URL}api/ping" >/dev/null 2>&1 && break
+    sleep 0.25
+done
+if ! curl -fsS -m 1 "${URL}api/ping" >/dev/null 2>&1; then
+    say "The server didn't start. Logs: journalctl --user -u refind-manager"
+    exit 1
+fi
+echo "rEFInd Manager: $URL"
+
+# 4. Open it.
+if (( OPEN )) && [[ -n ${DISPLAY:-}${WAYLAND_DISPLAY:-} ]]; then
+    xdg-open "$URL" >/dev/null 2>&1
+fi
+exit 0

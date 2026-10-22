@@ -1,0 +1,152 @@
+#!/usr/bin/env bash
+# refind-esp-sync: copy the built rEFInd config from the repo onto the ESP.
+#
+#   refind-esp-sync [--dry-run] [--force]
+#
+# Installed root-owned to /usr/local/lib/refind-manager/ by scripts/install-system.sh.
+# Run by refind-esp-sync.service, which the repo's owner may start without a
+# password (polkit rule), so the configurator's Save can apply changes; or run
+# directly as root via scripts/deploy.sh.
+#
+# Copies only runtime files: refind.conf, entries.conf, and themes/<name>/
+# (theme.conf + PNGs; symlinks and anything else are skipped). Refuses to deploy
+# a menu entry whose loader is missing, a dirty working tree (unless --force),
+# and theme names that aren't plain [a-z0-9-]. Writes rotation.conf for
+# refind-theme, re-picks the active theme, and records the deployed commit.
+# Never reboots or restarts anything.
+set -euo pipefail
+
+CONF=${REFIND_MANAGER_CONF:-/etc/refind-manager.conf}
+ESP=${REFIND_ESP:-/boot}            # REFIND_ESP is for testing against a scratch directory
+DEST=$ESP/EFI/refind
+STATE=${STATE_DIR:-/var/lib/refind-manager}
+DRY=0
+FORCE=0
+MOUNTS=()
+
+die() { echo "✗ $*" >&2; exit 1; }
+cleanup() { local m; for m in "${MOUNTS[@]}"; do umount "$m" && rmdir "$m"; done; }
+trap cleanup EXIT
+
+for arg; do
+    case $arg in
+        -n|--dry-run) DRY=1 ;;
+        -f|--force) FORCE=1 ;;
+        *) die "unknown argument $arg" ;;
+    esac
+done
+
+[[ $EUID -eq 0 ]] || die "must run as root"
+[[ -r $CONF ]] || die "$CONF missing; run scripts/install-system.sh"
+# shellcheck source=/dev/null
+. "$CONF"                           # REPO=..., OWNER=...
+[[ -d $REPO/.git ]] || die "$REPO is not the refind repo"
+[[ -n ${REFIND_ESP:-} ]] || mountpoint -q "$ESP" || die "$ESP is not mounted"
+[[ -f $DEST/refind_x64.efi ]] || die "rEFInd not found in $DEST"
+for f in refind.conf entries.conf src/config.json; do
+    [[ -f $REPO/$f && ! -L $REPO/$f ]] || die "$REPO/$f is missing or a symlink"
+done
+
+# git runs as the repo's owner: root would trip git's dubious-ownership check,
+# and it keeps hooks/config from ever running as root.
+as_owner() { if [[ $(id -u) -eq 0 && -z ${REFIND_ESP:-} ]]; then runuser -u "$OWNER" -- "$@"; else "$@"; fi; }
+
+if [[ -n $(as_owner git -C "$REPO" status --porcelain) ]] && (( ! FORCE )); then
+    as_owner git -C "$REPO" status --short >&2
+    die "uncommitted changes in $REPO; commit first (the configurator's Save does)"
+fi
+COMMIT=$(as_owner git -C "$REPO" log -1 --format='%h %s')
+echo "• deploying $COMMIT"
+
+# Where a partition (by PARTUUID) is mounted, mounting it read-only if it isn't.
+mount_ro() {
+    local dev=/dev/disk/by-partuuid/$1 mnt
+    [[ -e $dev ]] || return 1
+    mnt=$(findmnt -nro TARGET -S "$(readlink -f "$dev")" | head -n1)
+    if [[ -z $mnt ]]; then
+        mnt=$(mktemp -d /run/refind-esp-sync.XXXXXX)
+        mount -o ro "$dev" "$mnt"
+        MOUNTS+=("$mnt")
+    fi
+    echo "$mnt"
+}
+
+ok=1
+while read -r title volume loader; do
+    if [[ -n ${REFIND_ESP:-} ]]; then
+        echo "  (test) ${title//_/ }: $loader not checked"; continue
+    elif [[ $volume == - ]]; then
+        root=$ESP
+    elif ! root=$(mount_ro "$volume"); then
+        echo "  ✗ ${title//_/ }: volume $volume not found"; ok=0; continue
+    fi
+    if [[ -f $root$loader ]]; then
+        echo "  ✓ ${title//_/ }: $loader"
+    else
+        echo "  ✗ ${title//_/ }: $loader missing"; ok=0
+    fi
+done < <(awk '
+    /^menuentry/          { match($0, /"[^"]+"/); t = substr($0, RSTART + 1, RLENGTH - 2); v = "-"; l = "" }
+    /^[[:space:]]*volume/ { v = $2 }
+    /^[[:space:]]*loader/ { l = $2 }
+    /^}/                  { gsub(/ /, "_", t); print t, v, l }' "$REPO/entries.conf")
+(( ok )) || die "a boot entry points at a missing loader; not deploying"
+
+# Rotation settings from src/config.json, validated before they go anywhere.
+read -r MODE THEME POOL < <(python3 -I -c '
+import json, sys
+c = json.load(open(sys.argv[1]))
+r = c["rotation"]
+print(r["mode"], c["theme"], " ".join(r["themes"]))' "$REPO/src/config.json")
+[[ $MODE =~ ^(off|next|random)$ ]] || die "bad rotation mode: $MODE"
+for t in $THEME $POOL; do
+    [[ $t =~ ^[a-z0-9-]+$ && -f $REPO/themes/$t/theme.conf ]] || die "bad theme name or missing theme: $t"
+done
+mapfile -t THEME_DIRS < <(cd "$REPO/themes" && for d in */; do d=${d%/}; [[ $d =~ ^[a-z0-9-]+$ && -f $d/theme.conf ]] && echo "$d"; done)
+
+if (( DRY )); then
+    echo "• live: $(sed -n 's/^commit *//p' "$DEST/DEPLOYED" 2>/dev/null || echo 'never deployed from the repo')"
+    echo "• refind.conf changes (live → repo):"
+    diff -u "$DEST/refind.conf" "$REPO/refind.conf" || true
+    echo "• themes: ${THEME_DIRS[*]}"
+    echo "• rotation: $MODE over: $POOL (fixed theme when off: $THEME)"
+    exit 0
+fi
+
+[[ -e $DEST/refind.conf.pre-repo ]] || cp "$DEST/refind.conf" "$DEST/refind.conf.pre-repo"
+cp "$DEST/refind.conf" "$DEST/refind.conf.bak"
+cp "$REPO/refind.conf" "$REPO/entries.conf" "$DEST/"
+mkdir -p "$DEST/themes"
+for t in "${THEME_DIRS[@]}"; do
+    rsync -rt --delete --modify-window=2 --include='*/' --include='*.png' --include='theme.conf' --exclude='*' \
+        "$REPO/themes/$t/" "$DEST/themes/$t/"
+done
+# Remove themes this tool deployed before that are gone from the repo.
+if [[ -r $DEST/themes/.managed ]]; then
+    while read -r old; do
+        [[ $old =~ ^[a-z0-9-]+$ ]] || continue
+        printf '%s\n' "${THEME_DIRS[@]}" | grep -qxF -- "$old" || { rm -rf "${DEST:?}/themes/$old"; echo "• removed theme $old"; }
+    done < "$DEST/themes/.managed"
+fi
+printf '%s\n' "${THEME_DIRS[@]}" > "$DEST/themes/.managed"
+printf 'MODE=%s\nTHEMES=%s\n' "$MODE" "$POOL" > "$DEST/rotation.conf"
+echo "• copied config and themes: ${THEME_DIRS[*]}"
+
+# Active theme: the fixed one when rotation is off; otherwise keep the current
+# theme if it's still in the pool, else shuffle into the pool.
+export REFIND_DIR=$DEST STATE_DIR=$STATE
+mkdir -p "$STATE"
+current=$(refind-theme current 2>/dev/null || true)
+if [[ $MODE == off ]]; then
+    refind-theme set "$THEME"
+elif [[ " $POOL " == *" $current "* ]]; then
+    refind-theme set "$current"
+else
+    refind-theme random
+fi
+echo "• rotation: $MODE ($POOL)"
+
+printf 'commit   %s%s\ndeployed %s\n' "$COMMIT" "$( (( FORCE )) && echo ' (+ uncommitted changes)')" "$(date -Is)" \
+    | tee "$DEST/DEPLOYED" > "$STATE/deployed"
+sync -f "$DEST/refind.conf"
+echo "✓ deployed $COMMIT; shows on next boot"

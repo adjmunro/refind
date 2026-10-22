@@ -1,8 +1,0 @@
-{
-  "os_cachyos": "system-cachyos.hello",
-  "os_win": "ambience-os_win",
-  "os_mint": "phosphor-plant-fill",
-  "func_shutdown": "remix-shut-down-line",
-  "func_reset": "lucide-refresh-cw",
-  "func_firmware": "bootstrap-cpu-fill"
-}

@@ -1,0 +1,11 @@
+[Unit]
+Description=Copy the rEFInd configuration from the refind repo onto the ESP
+Documentation=https://github.com/adjmunro/refind
+RequiresMountsFor=/boot
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/lib/refind-manager/refind-esp-sync
+StateDirectory=refind-manager
+StandardOutput=truncate:/var/lib/refind-manager/last-sync.log
+StandardError=inherit

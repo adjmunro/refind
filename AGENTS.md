@@ -4,93 +4,109 @@ Instructions for any AI agent (Claude Code, Codex, etc.) working in this repo.
 
 ## What this is
 
-The rEFInd boot manager configuration and themes for **magikarp**, a CachyOS
-desktop that triple-boots CachyOS, Windows and Linux Mint. The repo lives at
-`/data/repos/refind` on magikarp and is deployed to the EFI system partition
-(ESP) at `/boot/EFI/refind` by `scripts/deploy.sh`.
+The rEFInd boot menu for **magikarp**, a CachyOS desktop that triple-boots
+CachyOS, Windows and Linux Mint: config, five themes, and **rEFInd Manager**,
+a self-contained configurator. The repo lives at `/data/repos/refind` on
+magikarp and is pushed to github.com/adjmunro/refind.
 
-The ESP itself is **not** a git repo on purpose: it's FAT32, root-only, and
-shared with the CachyOS kernels. The repo is the source of truth; the ESP is a
-build target that gets only the runtime files (config, entries, theme PNGs).
-`deploy.sh` refuses a dirty tree and writes the deployed commit to
-`/boot/EFI/refind/DEPLOYED`, so the ESP always maps to a commit here.
+The user configures everything in the browser, never the terminal:
 
-`CLAUDE.md` only contains `@AGENTS.md`. Keep it: per the Claude Code docs, a
-CLAUDE.md importing AGENTS.md works in every Claude Code version, while AGENTS.md
-on its own needs v2.1.277+ and isn't read in some sessions.
+1. Double-click `rEFInd Manager.desktop` (or the applications-menu entry), or
+   ask an agent to start it. `scripts/refind-manager` fetches + fast-forwards,
+   installs/updates the system parts if needed (one pkexec password dialog),
+   (re)starts the server and opens the page.
+2. The page is at **http://100.70.83.116:8765/** (magikarp's Tailscale IP) from
+   any of the user's devices. Use the IP, not `magikarp`: the user's browsers
+   (Helium, Zen) use DNS-over-HTTPS and can't resolve Tailscale names.
+3. **Save & apply** writes `src/config.json`, builds, commits, pushes, then
+   starts `refind-esp-sync.service`, which copies the build onto the ESP.
+
+When the user asks you to "spin it up" from another machine:
+`ssh magikarp /data/repos/refind/scripts/refind-manager --no-open`, then open
+http://100.70.83.116:8765/ in their browser (on macOS: `open <url>`).
+
+The ESP is **not** a git checkout on purpose (FAT32, root-only, shared with the
+CachyOS kernels). It gets only runtime files, and `/boot/EFI/refind/DEPLOYED`
+records which commit is installed. `CLAUDE.md` only contains `@AGENTS.md`:
+keep it. Per the Claude Code docs, a CLAUDE.md importing AGENTS.md works in
+every version, while AGENTS.md on its own needs v2.1.277+ and isn't read in
+some sessions.
 
 ## Git workflow (always)
 
 There is one branch, `main`, and it tracks the current state. No feature
 branches, no PRs.
 
-1. **Before changing anything:** `git pull --rebase`.
-2. Make the change. If it touches icons, palettes, backgrounds, fonts or
-   `entries.conf`, run `python3 src/build.py --preview` and include the regenerated
-   files (`themes/*/`, `preview/`, `docs/preview-*.jpg`) in the commit.
+1. **Before changing anything:** `git pull --rebase`. The configurator commits
+   and pushes by itself ("Configure boot menu" commits), so main moves.
+2. Make the change. If it touches `src/` (config, icons, palettes, backgrounds,
+   templates) or `entries.conf`, run `python3 src/build.py --preview` and
+   commit the regenerated files with it.
 3. **After every change:** commit with a clear message and `git push`.
-   Don't leave work uncommitted or unpushed.
 
-The icon lab's Save button (when served by `src/serve.py`) also commits and
-pushes on its own, so someone else may have pushed since you last looked:
-that's why step 1 matters. Its commits are titled "Pick icons in the lab".
+If you change `system/` or `bin/refind-theme`, the root-installed copies are
+stale until the user next opens rEFInd Manager on magikarp's desktop and
+approves the password prompt. Tell them.
 
 ## Hard rules
 
-- **Never reboot, shut down, or restart services** on magikarp. Other jobs run
-  there. A theme change shows up on the user's next boot; that's fine.
-- **Never write to `/boot` directly.** Deploying needs root, and you don't have
-  the user's sudo password. Tell the user the exact command to run
-  (`sudo scripts/deploy.sh --dry-run`, then `sudo scripts/deploy.sh`).
+- **Never reboot, shut down, or restart system services** on magikarp. Other
+  jobs run there. Restarting the user-level `refind-manager` server is fine.
+- **Never write to `/boot` yourself.** You have no sudo password. Changes reach
+  the ESP through Save (or `sudo scripts/deploy.sh`, which the user runs).
 - Every `menuentry` in `entries.conf` must point at a loader that exists;
-  `deploy.sh` checks this and refuses otherwise. `scanfor manual` means a broken
+  `refind-esp-sync` checks and refuses otherwise. `scanfor manual` means a broken
   entry is a missing OS, not a fallback.
-- Don't edit `upstream/`. It's the original themes, vendored for reference.
-- Don't hand-edit generated files: `themes/*/*.png`, `themes/*/icons/`,
-  `preview/data.js`, `preview/candidates/`, `src/icons/os_win.svg`,
-  `src/icons/os_cachyos.svg`, `src/candidates/`.
+- `refind-esp-sync` runs as root on files from this repo. Keep it data-only:
+  it must never execute anything from the repo, and must keep refusing symlinks,
+  odd theme names and non-PNG theme files.
+- Don't edit `upstream/` (vendored originals) or generated files:
+  `refind.conf`, `themes/`, `preview/data.js`, `preview/candidates/`,
+  `preview/backgrounds/`, `docs/preview-*.jpg`, `src/candidates/`,
+  `src/backgrounds/`, `src/icons/os_win.svg`, `src/icons/os_cachyos.svg`.
 
 ## Layout
 
 | Path | What |
 |---|---|
-| `refind.conf` | Main config: timeout, resolution, icon sizes, tools row, `scanfor manual`, then `include active-theme.conf`. |
+| `src/config.json` | **The settings**: icon picks, each theme's background, rotation (mode + pool), fixed theme, boot timeout/default. The configurator edits this. |
+| `src/build.py` | Builds `refind.conf` and `themes/*` from config. Theme palettes (`THEMES`) and the background library (`BACKGROUNDS`) live here. |
+| `src/refind.conf.in` | Template for `refind.conf` (`@TIMEOUT@`, `@DEFAULT@`). |
 | `entries.conf` | The boot entries. `{theme}` in icon paths becomes the active theme's name. |
-| `themes/<name>/theme.conf` | Hand-written styling for one theme (banner, selection images, font). |
-| `themes/<name>/*.png`, `icons/` | Generated by `src/build.py`. |
-| `src/build.py` | Renders all theme PNGs. Palettes live in `THEMES` here. |
-| `src/choices.json` | Which candidate each icon slot uses. Written by the lab's Save button or by hand. |
-| `src/icons/*.svg` | Our own icon masters (candidate id `own`). |
-| `src/candidates/<slot>/` | Every candidate icon per slot, fetched by `src/tools/fetch_candidates.py`. Provenance in `SOURCES.md`. |
-| `preview/index.html` | Browser simulator + icon lab. Works from disk; served by `src/serve.py` it gains Save. |
-| `src/serve.py`, `scripts/preview.sh` | Preview server on magikarp's Tailscale IP, port 8765 (`http://magikarp:8765/`), run as transient user unit `refind-preview`. |
-| `bin/refind-theme` | Theme switcher installed to `/usr/local/bin` (set / next / random / rotate). |
-| `systemd/refind-theme-rotate.service` | Rotates the theme on each CachyOS boot when rotation is on. |
-| `scripts/deploy.sh` | Installs everything to the ESP (root). `--dry-run` first. |
-| `scripts/inventory.sh` | Read-only report of every bootable thing (root). Output goes in `docs/inventory.md`. |
-| `docs/boot-entries.md` | What rEFInd can boot on this machine and why the menu looks the way it does. |
+| `src/backgrounds/` | Generated backgrounds (`src/tools/gen_backgrounds.py`: synthwave, automata). |
+| `src/icons/`, `src/candidates/` | Our icon masters, and every candidate per slot (`src/tools/fetch_candidates.py`, provenance in `SOURCES.md`). |
+| `preview/index.html` | The configurator page. |
+| `src/serve.py` | Its server: static files + `/api/state` + `/api/save`. Binds the Tailscale IP only. |
+| `scripts/refind-manager`, `rEFInd Manager.desktop` | The launcher. Runs the server as user unit `refind-manager`. |
+| `scripts/install-system.sh` | Root setup (via pkexec): installs `system/*` and `bin/refind-theme`, the polkit rule, `/etc/refind-manager.conf`. `--uninstall` removes it. |
+| `system/refind-esp-sync` (+ `.service`) | Root, data-only copy of the build onto the ESP. Polkit lets the repo owner start just this unit without a password. |
+| `system/refind-theme-rotate.service`, `bin/refind-theme` | Each CachyOS boot, applies the rotation mode from `rotation.conf` on the ESP. |
+| `scripts/deploy.sh` | Terminal route for the same deploy (`sudo scripts/deploy.sh [--dry-run]`). |
+| `scripts/inventory.sh` | Read-only report of everything bootable (root). Output: `docs/inventory.md`. |
+| `docs/boot-entries.md` | What rEFInd can boot on this machine and why the menu is shaped this way. |
 
 ## How theming works
 
 rEFInd only allows one level of `include`, so `refind-theme` composes
 `active-theme.conf` on the ESP from `themes/<name>/theme.conf` + `entries.conf`
-(with `{theme}` substituted). Switching theme rewrites that one small file, and
-icons follow because entries reference `themes/{theme}/icons/...`.
+(with `{theme}` substituted). Switching theme rewrites that one small file.
+`refind-esp-sync` writes `rotation.conf` (`MODE=off|next|random`, `THEMES=...`)
+and picks the active theme; `refind-theme-rotate.service` advances it each boot.
 
-## Icon rules
+## Icon and background rules
 
-- Display is 1920×1080. OS icons are 128 px (`big_icon_size`), tool icons
-  48 px (`small_icon_size`); selection images are rEFInd's tile sizes, 144 and 64.
-  Everything is rendered at exactly those sizes so rEFInd never rescales.
+- Display is 1920×1080. OS icons are 128 px, tool icons 48 px, selection images
+  rEFInd's tile sizes (144, 64). Backgrounds are cut to exactly 1920×1080.
+  Nothing is rescaled by rEFInd.
 - `build.py` trims every candidate to its visible pixels and scales it to fill
-  `FILL` of the square (74% OS, 80% tools), so different sources match in size.
-- Colour comes from the theme palette, never from the source file. `own` SVGs
-  are two-tone: `#ffffff` = glyph, `#999999` = shade. Masks in them must use the
-  keywords `white`/`black` so the colour swap doesn't touch them.
-- To change an icon: try candidates in the icon lab (`L` in the preview) and
-  press Save, or edit `src/choices.json`, rebuild, commit, push.
-- To add a candidate: add it to `SLOTS` in `src/tools/fetch_candidates.py`
-  (permissive licences only), rerun it, rebuild.
+  `FILL` (74% OS, 80% tools), then recolours it in the theme's palette.
+- `own` SVGs are two-tone: `#ffffff` = glyph, `#999999` = shade. Masks must use
+  the keywords `white`/`black` so the colour swap doesn't touch them.
+- rEFInd picks black or white label text from the background's top-left pixel.
+- Add a candidate: add it to `SLOTS` in `src/tools/fetch_candidates.py`
+  (permissive licences only), rerun it, rebuild. Add a background: drop a PNG
+  in `src/backgrounds/` (or add a generator), rebuild. Add a theme: add a
+  palette to `THEMES` and an entry in `config.json` `themes`, rebuild.
 
 ## Machine facts
 
@@ -99,5 +115,6 @@ icons follow because entries reference `themes/{theme}/icons/...`.
 - Windows ESP: `nvme1n1p1`, PARTUUID `fac9bf60-88c6-48fd-ba43-33268e15baf0`. Holds
   `bootmgfw.efi` and Mint's shim + GRUB (`/EFI/ubuntu/`).
 - Linux Mint root: `nvme0n1p1` (ext4). Secure Boot is off.
+- Desktop: XFCE on X11, polkit-gnome agent, Firefox. Tailscale IP 100.70.83.116.
 - Firmware boot order puts rEFInd first; Limine is a separate firmware entry,
   which is the fallback if rEFInd is ever broken (pick it from the firmware boot menu).
