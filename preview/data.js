@@ -130,7 +130,6 @@ window.REFIND = {
       "mdi-microsoft-windows",
       "mdi-microsoft-windows-classic",
       "minimal-os_win",
-      "own",
       "phosphor-windows-logo",
       "phosphor-windows-logo-fill",
       "remix-windows-fill",

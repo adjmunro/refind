@@ -1,4 +1,6 @@
 {
-  "icons": [],
+  "icons": [
+    "os_win/own"
+  ],
   "backgrounds": []
 }
