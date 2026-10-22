@@ -35,6 +35,15 @@ def run(*cmd, timeout=300):
     return subprocess.run(cmd, cwd=ROOT, capture_output=True, text=True, timeout=timeout)
 
 
+def push():
+    """git push, once more if a pre-push hook rewrote the commits (the user's global
+    hook re-signs unsigned commits and asks for the push to be repeated)."""
+    result = run("git", "push", "-q")
+    if result.returncode and "push again" in (result.stdout + result.stderr):
+        result = run("git", "push", "-q")
+    return result
+
+
 def read(path):
     try:
         return path.read_text().strip()
@@ -80,8 +89,8 @@ def save(config):
         commit = run("git", "commit", "-q", "-m", "Configure boot menu", "-m", summary(config))
         if not step("Commit", commit.returncode == 0, commit.stderr):
             return steps
-        push = run("git", "push", "-q")
-        if not step("Push", push.returncode == 0, push.stderr):
+        pushed = push()
+        if not step("Push", pushed.returncode == 0, pushed.stderr):
             return steps
     else:
         step("Commit", True, "no changes to commit")
@@ -171,8 +180,8 @@ def delete(kind, slot, cid):
                  "-m", "Removed in the configurator; recorded in src/removed.json so it isn't offered again.")
     if not step("Commit", commit.returncode == 0, commit.stderr):
         return 200, steps
-    push = run("git", "push", "-q")
-    step("Push", push.returncode == 0, push.stderr)
+    pushed = push()
+    step("Push", pushed.returncode == 0, pushed.stderr)
     return 200, steps
 
 
