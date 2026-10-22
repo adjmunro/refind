@@ -15,17 +15,25 @@ Themes are our takes on [rEFInd-minimal](https://github.com/evanpurkhiser/rEFInd
 
 ## Preview without rebooting
 
-Open `preview/index.html` in a browser (straight from disk). It simulates the
-boot screen with the real theme files:
+The preview simulates the boot screen with the real theme files. From any of
+your devices on Tailscale, start the server on magikarp and open
+**http://magikarp:8765/**:
+
+```bash
+scripts/preview.sh                          # stop: systemctl --user stop refind-preview
+```
+
+(On magikarp itself you can also just open `preview/index.html` from disk.)
 
 - **←/→ ↑/↓** move, **Enter** shows what would boot, click works too
 - **1–3** switch theme, **R** simulates a reboot (rotation)
-- **L** opens the icon lab: try every candidate icon per slot, then copy the
-  printed `CHOICES` into `src/build.py`
+- **L** opens the icon lab: try every candidate icon per slot, then **Save**,
+  which writes `src/choices.json`, rebuilds, commits and pushes
 
 ## Deploy
 
-Needs root; nothing is rebooted or restarted.
+Needs root; nothing is rebooted or restarted. Commit first: deploy refuses a
+dirty tree and records the deployed commit in `/boot/EFI/refind/DEPLOYED`.
 
 ```bash
 sudo scripts/deploy.sh --dry-run    # checks every boot entry exists, shows the diff

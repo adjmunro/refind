@@ -3,26 +3,33 @@
 #
 #   sudo scripts/deploy.sh --dry-run    show what would change; touches nothing
 #   sudo scripts/deploy.sh [theme]      install; keeps the active theme unless one is named
+#   sudo scripts/deploy.sh --force      deploy even with uncommitted changes
 #
 # Checks that every loader in entries.conf exists first, backs up the live
 # refind.conf, copies config + themes, installs refind-theme and its systemd
-# unit. Never reboots, never restarts services; the result shows on next boot.
+# unit, and records the deployed commit in /boot/EFI/refind/DEPLOYED. Only the
+# runtime files go to the ESP; the ESP is a build target, not a git checkout.
+# Never reboots, never restarts services; the result shows on next boot.
 set -euo pipefail
 
 REPO=$(cd "$(dirname "$0")/.." && pwd)
 ESP=/boot
 DEST=$ESP/EFI/refind
 DRY=0
+FORCE=0
 THEME=
 MOUNTS=()
 
 die() { echo "deploy: $*" >&2; exit 1; }
 cleanup() { local m; for m in "${MOUNTS[@]}"; do umount "$m" && rmdir "$m"; done; }
 trap cleanup EXIT
+# git as the repo's owner, not root (root trips git's dubious-ownership check)
+repo_git() { sudo -u "$(stat -c %U "$REPO")" git -C "$REPO" "$@"; }
 
 for arg; do
     case $arg in
         -n|--dry-run) DRY=1 ;;
+        -f|--force) FORCE=1 ;;
         -*) die "unknown option $arg" ;;
         *) THEME=$arg ;;
     esac
@@ -32,6 +39,14 @@ done
 mountpoint -q "$ESP" || die "$ESP is not mounted"
 [[ -f $DEST/refind_x64.efi ]] || die "rEFInd not found in $DEST"
 [[ -z $THEME || -f $REPO/themes/$THEME/theme.conf ]] || die "no such theme: $THEME"
+
+# The ESP should always match a commit, so what's installed can be traced.
+if [[ -n $(repo_git status --porcelain) ]] && (( ! FORCE )); then
+    repo_git status --short >&2
+    die "uncommitted changes; commit (and push) first, or pass --force"
+fi
+COMMIT=$(repo_git log -1 --format='%h %s')
+[[ -z $(repo_git rev-list '@{u}..HEAD' 2>/dev/null) ]] || echo "deploy: note: $COMMIT is not pushed yet" >&2
 
 # Where a partition (by PARTUUID) is mounted, mounting it read-only if it isn't.
 mount_ro() {
@@ -67,6 +82,7 @@ done < <(awk '
 (( ok )) || die "fix entries.conf before deploying (a missing loader is a dead menu entry)"
 
 if (( DRY )); then
+    echo "== Would deploy $COMMIT (live: $(sed -n 's/^commit *//p' "$DEST/DEPLOYED" 2>/dev/null || echo 'never deployed from this repo'))"
     echo "== refind.conf changes (live → repo)"
     diff -u "$DEST/refind.conf" "$REPO/refind.conf" || true
     echo "== File changes"
@@ -100,10 +116,12 @@ if [[ -z $THEME ]]; then
 fi
 refind-theme set "$THEME"
 refind-theme rotate status
+printf 'commit   %s%s\ndeployed %s by %s\n' "$COMMIT" "$( (( FORCE )) && echo ' (+ uncommitted changes)')" \
+    "$(date -Is)" "${SUDO_USER:-root}" > "$DEST/DEPLOYED"
 sync -f "$DEST/refind.conf"
 
 cat <<EOF
 
-Deployed. rEFInd picks this up on the next boot (nothing was restarted).
+Deployed $COMMIT. rEFInd picks this up on the next boot (nothing was restarted).
 Undo: sudo cp $DEST/refind.conf.pre-repo $DEST/refind.conf
 EOF

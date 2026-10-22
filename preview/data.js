@@ -52,12 +52,12 @@ window.REFIND = {
     }
   },
   "choices": {
-    "os_cachyos": "own",
+    "os_cachyos": "system-cachyos.hello",
     "os_win": "ambience-os_win",
-    "os_mint": "own",
-    "func_shutdown": "own",
-    "func_reset": "own",
-    "func_firmware": "own"
+    "os_mint": "phosphor-plant-fill",
+    "func_shutdown": "remix-shut-down-line",
+    "func_reset": "lucide-refresh-cw",
+    "func_firmware": "bootstrap-cpu-fill"
   },
   "candidates": {
     "os_cachyos": [

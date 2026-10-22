@@ -7,8 +7,8 @@
 Always writes preview/data.js too, for the in-browser simulator (preview/index.html).
 
 Needs rsvg-convert (librsvg) and Pillow. The output is committed, so deploying
-never needs these tools. Theme look is defined in THEMES below; theme.conf files
-are hand-written and not touched by this script.
+never needs these tools. Theme look is defined in THEMES below, icon picks in
+src/choices.json; theme.conf files are hand-written and not touched by this script.
 """
 import argparse
 import io
@@ -29,16 +29,9 @@ BIG_TILE, SMALL_TILE = BIG * 9 // 8, SMALL * 4 // 3   # rEFInd's tile sizes for 
 FONT_FILE = "/usr/share/fonts/Adwaita/AdwaitaMono-Regular.ttf"
 FONT_PX = 22
 
-# Which candidate (src/candidates/<slot>/<id>.*) each icon slot uses. Pick them
-# in the icon lab (preview/index.html), which prints this dict for you.
-CHOICES = {
-    "os_cachyos": "own",
-    "os_win": "ambience-os_win",
-    "os_mint": "own",
-    "func_shutdown": "own",
-    "func_reset": "own",
-    "func_firmware": "own",
-}
+# Which candidate (src/candidates/<slot>/<id>.*) each icon slot uses. The icon
+# lab's Save button writes this file (see src/serve.py); editing it by hand works too.
+CHOICES = json.loads((ROOT / "src" / "choices.json").read_text())
 # How much of the icon square a glyph's bounding box fills, so every candidate
 # comes out the same visual size whatever padding its source had.
 FILL = {"os": 0.74, "func": 0.80}
