@@ -4,7 +4,8 @@
     python3 src/serve.py [--host IP] [--port 8765]     (normally via scripts/refind-manager)
 
 Binds to localhost and this machine's Tailscale address, nothing else, so your
-devices reach it at http://<tailnet name>:8765/ (port 80 is the magikarp home page).
+devices reach it at http://<tailnet name>/refind/ (the magikarp home page on port 80
+proxies that path here) or http://<tailnet name>:8765/. Page URLs must stay relative.
 
     GET  /api/state   config, git state, and what's deployed to the ESP
     POST /api/save    {config}: write src/config.json, build, commit, push,

@@ -76,10 +76,15 @@ if ! curl -fsS -m 1 "${LOCAL}api/ping" >/dev/null 2>&1; then
     exit 1
 fi
 
-# The address to use: this machine's tailnet name (port 80 belongs to the
-# magikarp home page, which links here).
+# The address to use: http://<tailnet name>/refind/ when the magikarp home page
+# (port 80, /data/repos/magikarp-home) proxies that path to us, else the port.
 NAME=$(tailscale status --json 2>/dev/null | python3 -c 'import json,sys; print(json.load(sys.stdin)["Self"]["DNSName"].split(".")[0])' 2>/dev/null)
-URL="http://${NAME:-$(tailscale ip -4 2>/dev/null | head -n1)}:$PORT/"
+HOST=${NAME:-$(tailscale ip -4 2>/dev/null | head -n1)}
+if curl -fsS -m 2 http://127.0.0.1/refind/api/ping >/dev/null 2>&1; then
+    URL="http://$HOST/refind/"
+else
+    URL="http://$HOST:$PORT/"
+fi
 echo "rEFInd Manager: $URL"
 
 # 4. Open it.

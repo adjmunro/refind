@@ -410,13 +410,13 @@ async function remove(kind, slot, id) {
   deleting = true;
   toast(`Deleting ${id}…`);
   try {
-    const r = await fetch("/api/delete", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ kind, slot, id }) });
+    const r = await fetch("../api/delete", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ kind, slot, id }) });
     const j = await r.json();
     if (!j.ok) throw new Error(j.error || r.status);
     if (kind === "icon") D.candidates[slot] = D.candidates[slot].filter(c => c !== id);
     else delete D.backgrounds[id];
     toast(`Deleted ${id} (committed and pushed)`);
-    server = await fetch("/api/state").then(r => r.json()).catch(() => server);
+    server = await fetch("../api/state").then(r => r.json()).catch(() => server);
     renderAll();
   } catch (err) {
     toast(`Couldn't delete ${id}: ${err.message}`);
@@ -469,7 +469,7 @@ $("save").onclick = async () => {
   $("modalClose").classList.add("hidden");
   $("modal").classList.remove("hidden");
   try {
-    const r = await fetch("/api/save", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(cfg) });
+    const r = await fetch("../api/save", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(cfg) });
     const j = await r.json();
     if (!r.ok) throw new Error(j.error || r.status);
     steps.innerHTML = "";
@@ -510,7 +510,7 @@ addEventListener("beforeunload", e => { if (dirty() && $("modal").classList.cont
 fit();
 renderAll();
 if (location.protocol.startsWith("http")) {
-  fetch("/api/state").then(r => r.ok ? r.json() : null).then(s => { server = s; renderPanel(); }).catch(() => renderStatus());
+  fetch("../api/state").then(r => r.ok ? r.json() : null).then(s => { server = s; renderPanel(); }).catch(() => renderStatus());
 }
 </script>
 </body>
