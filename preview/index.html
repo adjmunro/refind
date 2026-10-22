@@ -1,0 +1,267 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>rEFInd Preview</title>
+<!--
+  A rough simulator of magikarp's rEFInd screen, drawn from the real theme files
+  in ../themes and the entries in ../entries.conf (via data.js, written by
+  src/build.py), plus an icon lab for trying every candidate in src/candidates.
+  Open it straight from disk: no server needed.
+
+  Keys: ←/→ move · ↑/↓ switch row · Enter "boot" · 1-9 pick theme
+        R simulate a reboot (rotates to the next theme) · L icon lab · H hide panels
+-->
+<style>
+  :root { color-scheme: dark; --panel: rgb(20 20 24 / 0.82); --text: #e8e8ea; --muted: #a8a8b0; --line: rgb(255 255 255 / 0.15); }
+  html, body { margin: 0; height: 100%; background: #000; overflow: hidden; font: 13px/1.4 system-ui, sans-serif; color: var(--text); }
+  #stage { position: absolute; left: 50%; top: 50%; transform-origin: 0 0; background-size: cover; }
+  .tile { position: absolute; cursor: pointer; }
+  .tile .sel { position: absolute; inset: 0; background-size: 100% 100%; visibility: hidden; }
+  .tile.on .sel { visibility: visible; }
+  .tile img { position: absolute; }
+  #label { position: absolute; left: 0; right: 0; display: flex; justify-content: center; }
+  #label span { display: block; background-repeat: no-repeat; }
+  #label.white span { filter: invert(1); }
+  .panel { position: fixed; background: var(--panel); backdrop-filter: blur(10px); box-shadow: 0 4px 24px rgb(0 0 0 / 0.45); border-radius: 10px; }
+  .hidden { display: none !important; }
+  #hud { top: 12px; right: 12px; padding: 10px 12px; max-width: 300px; }
+  h1 { font-size: 13px; margin: 0 0 8px; font-weight: 600; }
+  h2 { font-size: 12px; margin: 14px 0 6px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; }
+  .row { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 8px; }
+  button { font: inherit; color: inherit; background: rgb(255 255 255 / 0.08); border: 1px solid var(--line); border-radius: 6px; padding: 4px 9px; cursor: pointer; }
+  button.on { background: var(--text); color: #111; }
+  p { margin: 0; color: var(--muted); font-size: 12px; }
+  #lab { top: 12px; left: 12px; bottom: 12px; width: 420px; padding: 12px 14px; overflow-y: auto; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(64px, 1fr)); gap: 6px; padding: 8px; border-radius: 8px; background-size: cover; background-position: center; }
+  .cand { aspect-ratio: 1; padding: 6px; display: grid; place-items: center; border-radius: 6px; background: rgb(0 0 0 / 0); border: 1px solid transparent; }
+  .cand:hover { border-color: rgb(255 255 255 / 0.5); }
+  .cand.on { border: 2px solid #4cc2ff; background: rgb(76 194 255 / 0.12); }
+  .cand img { max-width: 100%; max-height: 100%; }
+  .name { font: 11px ui-monospace, monospace; color: var(--muted); margin-top: 4px; min-height: 1.2em; }
+  pre { font: 11px/1.5 ui-monospace, monospace; background: rgb(0 0 0 / 0.35); padding: 8px; border-radius: 6px; user-select: all; white-space: pre-wrap; margin: 6px 0; }
+  #toast { position: fixed; left: 50%; bottom: 40px; transform: translateX(-50%); padding: 12px 16px; border-radius: 10px; background: var(--panel);
+           opacity: 0; transition: opacity .2s; pointer-events: none; font: 13px/1.5 ui-monospace, monospace; white-space: pre; }
+  #toast.show { opacity: 1; }
+</style>
+</head>
+<body>
+<div id="stage"></div>
+<div id="hud" class="panel">
+  <h1>rEFInd preview · magikarp</h1>
+  <div class="row" id="themes"></div>
+  <div class="row"><button id="reboot">Simulate reboot (rotate)</button><button id="labBtn">Icon lab</button></div>
+  <p>←/→ move · ↑/↓ row · Enter boot · 1–9 theme · R reboot · L lab · H hide</p>
+</div>
+<div id="lab" class="panel hidden">
+  <h1>Icon lab</h1>
+  <p>Click a candidate to try it. Each is trimmed, scaled and recoloured exactly as the real build does. Hover for its name.</p>
+  <h2>Tool button sets</h2>
+  <div class="row" id="sets"></div>
+  <div id="slots"></div>
+  <h2>Your picks (paste into CHOICES in src/build.py)</h2>
+  <pre id="out"></pre>
+  <button id="copy">Copy</button> <button id="reset">Reset to current build</button>
+</div>
+<div id="toast"></div>
+<script src="data.js"></script>
+<script>
+const D = window.REFIND;
+const TOOLS = [
+  { slot: "func_shutdown", title: "Shut Down Computer", action: "Power off" },
+  { slot: "func_reset", title: "Reboot Computer", action: "Restart" },
+  { slot: "func_firmware", title: "Reboot to Computer Setup Utility", action: "Restart into the UEFI firmware setup (\"BIOS\")" },
+];
+const SLOT_TITLES = { os_cachyos: "CachyOS", os_win: "Windows", os_mint: "Linux Mint",
+  func_shutdown: "Power off", func_reset: "Restart", func_firmware: "Firmware (BIOS)" };
+const names = Object.keys(D.themes);
+const stage = document.getElementById("stage");
+const params = new URLSearchParams(location.search);
+let theme = params.get("theme") || (D.themes.minimal ? "minimal" : names[0]);
+const choice = { ...D.choices };
+for (const s in choice) if (params.get(s) && D.candidates[s].includes(params.get(s))) choice[s] = params.get(s);
+let row = 0, col = 0;
+
+const iconSrc = (slot, id = choice[slot], t = theme) => `candidates/${t}/${slot}/${id}.png`;
+
+function fit() {
+  const [W, H] = D.screen;
+  const s = Math.min(innerWidth / W, innerHeight / H);
+  Object.assign(stage.style, { width: W + "px", height: H + "px", transform: `scale(${s}) translate(-50%, -50%)` });
+}
+
+function tile(x, y, size, iconSize, slot, selImg, on, onClick) {
+  const t = document.createElement("div");
+  t.className = "tile" + (on ? " on" : "");
+  Object.assign(t.style, { left: x + "px", top: y + "px", width: size + "px", height: size + "px" });
+  const sel = document.createElement("div");
+  sel.className = "sel";
+  sel.style.backgroundImage = `url(../themes/${theme}/${selImg})`;
+  const img = document.createElement("img");
+  img.src = iconSrc(slot);
+  const o = (size - iconSize) / 2;
+  Object.assign(img.style, { left: o + "px", top: o + "px", width: iconSize + "px", height: iconSize + "px" });
+  t.append(sel, img);
+  t.onclick = onClick;
+  return t;
+}
+
+function render() {
+  const [W, H] = D.screen;
+  const T = D.themes[theme];
+  stage.innerHTML = "";
+  stage.style.backgroundImage = `url(../themes/${theme}/background.png)`;
+  const yBig = Math.floor((H - (D.bigTile + 16 + D.smallTile)) / 2);
+  const ySmall = yBig + D.bigTile + 16;
+  const rows = [
+    { items: D.entries.map(e => ({ ...e, slot: e.icon })), y: yBig, size: D.bigTile, icon: D.big, sel: "selection_big.png" },
+    { items: TOOLS, y: ySmall, size: D.smallTile, icon: D.small, sel: "selection_small.png" },
+  ];
+  rows.forEach((r, ri) => {
+    const width = r.items.length * r.size + (r.items.length - 1) * 8;
+    r.items.forEach((item, ci) => {
+      const x = Math.floor((W - width) / 2) + ci * (r.size + 8);
+      stage.append(tile(x, r.y, r.size, r.icon, item.slot, r.sel, ri === row && ci === col,
+        () => { row = ri; col = ci; render(); boot(); }));
+    });
+  });
+  // Label of the selected item, drawn from the theme's bitmap font like rEFInd does.
+  const label = document.createElement("div");
+  label.id = "label";
+  label.className = T.text;
+  label.style.top = ySmall + D.smallTile + 24 + "px";
+  const [cw, ch] = T.cell;
+  for (const c of rows[row].items[col].title) {
+    const code = c.charCodeAt(0);
+    const idx = code >= 32 && code <= 126 ? code - 32 : 95;
+    const s = document.createElement("span");
+    Object.assign(s.style, { width: cw + "px", height: ch + "px",
+      backgroundImage: `url(../themes/${theme}/font.png)`, backgroundPosition: `${-idx * cw}px 0` });
+    label.append(s);
+  }
+  stage.append(label);
+  document.querySelectorAll("#themes button").forEach(b => b.classList.toggle("on", b.dataset.name === theme));
+  renderLab();
+  const q = new URLSearchParams({ theme });
+  for (const s in choice) if (choice[s] !== D.choices[s]) q.set(s, choice[s]);
+  history.replaceState(null, "", "?" + q);
+}
+
+// Tool candidates grouped into matching sets: source prefix + weight, e.g. "phosphor-light".
+const WEIGHTS = ["thin", "light", "bold", "fill", "duotone", "line"];
+const setKey = id => {
+  const parts = id.split("-");
+  const w = parts[parts.length - 1];
+  return parts[0] + (parts.length > 1 && WEIGHTS.includes(w) ? "-" + w : "");
+};
+const toolSets = (() => {
+  const per = TOOLS.map(t => new Set(D.candidates[t.slot].map(setKey)));
+  return [...per[0]].filter(k => per.every(p => p.has(k)));
+})();
+
+function renderLab() {
+  const lab = document.getElementById("lab");
+  if (lab.classList.contains("hidden")) return;
+  const sets = document.getElementById("sets");
+  sets.innerHTML = "";
+  for (const k of toolSets) {
+    const b = document.createElement("button");
+    b.textContent = k;
+    b.classList.toggle("on", TOOLS.every(t => setKey(choice[t.slot]) === k));
+    b.onclick = () => { for (const t of TOOLS) choice[t.slot] = D.candidates[t.slot].find(id => setKey(id) === k); render(); };
+    sets.append(b);
+  }
+  const slots = document.getElementById("slots");
+  const scroll = lab.scrollTop;
+  slots.innerHTML = "";
+  for (const slot of Object.keys(D.candidates)) {
+    const h = document.createElement("h2");
+    h.textContent = SLOT_TITLES[slot] || slot;
+    const grid = document.createElement("div");
+    grid.className = "grid";
+    grid.style.backgroundImage = `url(../themes/${theme}/background.png)`;
+    const name = document.createElement("div");
+    name.className = "name";
+    name.textContent = choice[slot];
+    for (const id of D.candidates[slot]) {
+      const b = document.createElement("button");
+      b.className = "cand" + (choice[slot] === id ? " on" : "");
+      b.title = id;
+      const img = document.createElement("img");
+      img.src = iconSrc(slot, id);
+      b.append(img);
+      b.onclick = () => { choice[slot] = id; render(); };
+      b.onmouseenter = () => name.textContent = id;
+      b.onmouseleave = () => name.textContent = choice[slot];
+      grid.append(b);
+    }
+    slots.append(h, grid, name);
+  }
+  document.getElementById("out").textContent =
+    "CHOICES = {\n" + Object.entries(choice).map(([s, id]) => `    "${s}": "${id}",`).join("\n") + "\n}";
+  lab.scrollTop = scroll;
+}
+
+let toastTimer;
+function toast(msg) {
+  const el = document.getElementById("toast");
+  el.textContent = msg;
+  el.classList.add("show");
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => el.classList.remove("show"), 3500);
+}
+
+function boot() {
+  if (row === 0) {
+    const e = D.entries[col];
+    toast(`Would boot ${e.title}\n  loader ${e.loader}\n  volume ${e.volume}`);
+  } else {
+    toast(`Would ${TOOLS[col].action.charAt(0).toLowerCase() + TOOLS[col].action.slice(1)}`);
+  }
+}
+
+function setTheme(name) { theme = name; render(); }
+function reboot() {
+  theme = names[(names.indexOf(theme) + 1) % names.length];
+  row = 0; col = 0; render();
+  toast(`Rebooted → theme "${theme}"`);
+}
+function toggleLab() { document.getElementById("lab").classList.toggle("hidden"); renderLab(); }
+
+names.forEach((n, i) => {
+  const b = document.createElement("button");
+  b.textContent = `${i + 1} ${n}`;
+  b.dataset.name = n;
+  b.onclick = () => setTheme(n);
+  document.getElementById("themes").append(b);
+});
+document.getElementById("reboot").onclick = reboot;
+document.getElementById("labBtn").onclick = toggleLab;
+document.getElementById("reset").onclick = () => { Object.assign(choice, D.choices); render(); };
+document.getElementById("copy").onclick = async () => {
+  try { await navigator.clipboard.writeText(document.getElementById("out").textContent); toast("Copied"); }
+  catch { toast("Select the text above and copy it"); }
+};
+
+addEventListener("keydown", e => {
+  const len = r => (r === 0 ? D.entries : TOOLS).length;
+  if (e.key === "ArrowRight") col = (col + 1) % len(row);
+  else if (e.key === "ArrowLeft") col = (col - 1 + len(row)) % len(row);
+  else if (e.key === "ArrowDown" || e.key === "ArrowUp") { row = 1 - row; col = Math.min(col, len(row) - 1); }
+  else if (e.key === "Enter") return boot();
+  else if (e.key === "r" || e.key === "R") return reboot();
+  else if (e.key === "l" || e.key === "L") return toggleLab();
+  else if (e.key === "h" || e.key === "H") { document.getElementById("hud").classList.toggle("hidden"); document.getElementById("lab").classList.add("hidden"); return; }
+  else if (/^[1-9]$/.test(e.key) && names[+e.key - 1]) return setTheme(names[+e.key - 1]);
+  else return;
+  e.preventDefault();
+  render();
+});
+addEventListener("resize", fit);
+if (!D.themes[theme]) theme = names[0];
+fit();
+render();
+</script>
+</body>
+</html>

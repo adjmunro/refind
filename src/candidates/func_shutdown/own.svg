@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Standby symbol (IEC 60417-5009): broken ring with a bar through the gap. Thin-line style. -->
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256">
+  <g fill="none" stroke="#ffffff" stroke-width="13" stroke-linecap="round">
+    <path d="M172.74 78.11 A78 78 0 1 1 83.26 78.11"/>
+    <path d="M128 40 V124"/>
+  </g>
+</svg>

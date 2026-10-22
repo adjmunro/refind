@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Linux Mint: a single mint leaf, two-tone like a folded leaf, instead of the official "lm" badge.
+     #ffffff is the glyph colour and #999999 the shade colour; build.py swaps both per theme. -->
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256">
+  <defs>
+    <mask id="veins">
+      <rect width="256" height="256" fill="white"/>
+      <g fill="none" stroke="black" stroke-linecap="round">
+        <path d="M128 214 Q125 140 128 74" stroke-width="7"/>
+        <path d="M127 168 Q142 156 152 140" stroke-width="5"/>
+        <path d="M126 128 Q139 117 146 102" stroke-width="5"/>
+        <path d="M127 168 Q112 156 102 140" stroke-width="5"/>
+        <path d="M126 128 Q113 117 106 102" stroke-width="5"/>
+      </g>
+    </mask>
+  </defs>
+  <g transform="rotate(38 128 128)">
+    <g mask="url(#veins)">
+      <path d="M128 214 C64 196 54 92 128 30 Z" fill="#ffffff"/>
+      <path d="M128 214 C192 196 202 92 128 30 Z" fill="#999999"/>
+    </g>
+    <path d="M128 210 Q127 226 120 240" fill="none" stroke="#ffffff" stroke-width="9" stroke-linecap="round"/>
+  </g>
+</svg>

@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Restart: clockwise open ring ending in an arrowhead at twelve o'clock. Thin-line style. -->
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256">
+  <g transform="translate(128 136)">
+    <path d="M67.55 -39 A78 78 0 1 1 -2 -77.97" fill="none" stroke="#ffffff" stroke-width="13" stroke-linecap="round"/>
+    <path d="M-8 -101 L30 -78 L-8 -55 Z" fill="#ffffff" stroke="#ffffff" stroke-width="7" stroke-linejoin="round"/>
+  </g>
+</svg>

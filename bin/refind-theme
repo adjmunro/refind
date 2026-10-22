@@ -1,0 +1,127 @@
+#!/usr/bin/env bash
+# refind-theme: switch or rotate the rEFInd theme on the ESP.
+#
+#   refind-theme list                   themes installed on the ESP (* = active)
+#   refind-theme current                print the active theme
+#   refind-theme set <name>             make <name> active from the next boot
+#   refind-theme next | random          pick the next / a random other theme
+#   refind-theme rotate on [next|random]   change theme on every CachyOS boot
+#   refind-theme rotate off | status
+#
+# The active theme is whatever active-theme.conf (included by refind.conf) was
+# composed from: themes/<name>/theme.conf plus entries.conf, with {theme} in
+# icon paths replaced by <name>. Installed to /usr/local/bin by scripts/deploy.sh.
+set -euo pipefail
+
+REFIND_DIR=${REFIND_DIR:-/boot/EFI/refind}
+CONFIG=/etc/refind-theme.conf
+UNIT=refind-theme-rotate.service
+ACTIVE=$REFIND_DIR/active-theme.conf
+
+die() { echo "refind-theme: $*" >&2; exit 1; }
+need_root() { [[ $EUID -eq 0 ]] || die "needs root to write the ESP; run with sudo"; }
+
+themes() {
+    local d
+    for d in "$REFIND_DIR"/themes/*/; do
+        [[ -f $d/theme.conf ]] && basename "$d"
+    done
+}
+
+current() {
+    [[ -r $ACTIVE ]] || return 1
+    sed -n 's/^# Active theme: \([^ ]*\).*/\1/p' "$ACTIVE" | head -n1
+}
+
+set_theme() {
+    local name=$1 tmp
+    need_root
+    [[ -f $REFIND_DIR/themes/$name/theme.conf ]] || die "no such theme: $name (have: $(themes | tr '\n' ' '))"
+    [[ -f $REFIND_DIR/entries.conf ]] || die "missing $REFIND_DIR/entries.conf; run scripts/deploy.sh"
+    tmp=$ACTIVE.tmp
+    {
+        echo "# Active theme: $name"
+        echo "# Written by refind-theme on $(date -Is). Do not edit; run: refind-theme set <name>"
+        echo
+        cat "$REFIND_DIR/themes/$name/theme.conf"
+        echo
+        sed "s/{theme}/$name/g" "$REFIND_DIR/entries.conf"
+    } > "$tmp"
+    mv -f "$tmp" "$ACTIVE"
+    sync -f "$ACTIVE"
+    echo "rEFInd theme: $name"
+}
+
+pick_next() {
+    local cur all i
+    cur=$(current || true)
+    mapfile -t all < <(themes)
+    (( ${#all[@]} )) || die "no themes in $REFIND_DIR/themes"
+    for i in "${!all[@]}"; do
+        if [[ ${all[$i]} == "$cur" ]]; then
+            echo "${all[$(( (i + 1) % ${#all[@]} ))]}"
+            return
+        fi
+    done
+    echo "${all[0]}"
+}
+
+pick_random() {
+    local cur others
+    cur=$(current || true)
+    mapfile -t others < <(themes | grep -vxF -- "$cur" || true)
+    (( ${#others[@]} )) || { pick_next; return; }
+    echo "${others[$(( RANDOM % ${#others[@]} ))]}"
+}
+
+rotate() {
+    case ${1:-status} in
+        on)
+            need_root
+            local mode=${2:-next}
+            [[ $mode == next || $mode == random ]] || die "rotate mode must be next or random"
+            echo "ROTATE=$mode" > "$CONFIG"
+            systemctl enable "$UNIT" >/dev/null
+            echo "Theme rotation on ($mode), from the next CachyOS boot."
+            ;;
+        off)
+            need_root
+            systemctl disable "$UNIT" >/dev/null 2>&1 || true
+            rm -f "$CONFIG"
+            echo "Theme rotation off; staying on $(current || echo '?')."
+            ;;
+        status)
+            if systemctl is-enabled --quiet "$UNIT" 2>/dev/null && [[ -r $CONFIG ]]; then
+                echo "rotation: on ($(sed -n 's/^ROTATE=//p' "$CONFIG"))"
+            else
+                echo "rotation: off"
+            fi
+            ;;
+        boot)
+            # Run by refind-theme-rotate.service on every boot.
+            [[ -r $CONFIG ]] || exit 0
+            case $(sed -n 's/^ROTATE=//p' "$CONFIG") in
+                random) set_theme "$(pick_random)" ;;
+                *)      set_theme "$(pick_next)" ;;
+            esac
+            ;;
+        *) die "usage: refind-theme rotate on [next|random] | off | status" ;;
+    esac
+}
+
+[[ -d $REFIND_DIR ]] || die "$REFIND_DIR not found (is the ESP mounted?)"
+
+case ${1:-} in
+    list)
+        cur=$(current || true)
+        themes | while read -r t; do
+            [[ $t == "$cur" ]] && echo "* $t" || echo "  $t"
+        done
+        ;;
+    current) current || die "no active theme yet" ;;
+    set)     [[ -n ${2:-} ]] || die "usage: refind-theme set <name>"; set_theme "$2" ;;
+    next)    set_theme "$(pick_next)" ;;
+    random)  set_theme "$(pick_random)" ;;
+    rotate)  shift; rotate "$@" ;;
+    *)       sed -n '2,12s/^# \{0,1\}//p' "$0"; exit 2 ;;
+esac

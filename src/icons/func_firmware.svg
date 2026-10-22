@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Firmware: a square quad-flat chip, pins on all four sides, solid die. Thin-line style. -->
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256">
+  <g fill="none" stroke="#ffffff" stroke-width="11" stroke-linecap="round" stroke-linejoin="round">
+    <rect x="72" y="72" width="112" height="112" rx="12"/>
+    <path d="M100 72 V42 M128 72 V42 M156 72 V42"/>
+    <path d="M100 184 V214 M128 184 V214 M156 184 V214"/>
+    <path d="M72 100 H42 M72 128 H42 M72 156 H42"/>
+    <path d="M184 100 H214 M184 128 H214 M184 156 H214"/>
+  </g>
+  <rect x="106" y="106" width="44" height="44" rx="5" fill="#ffffff"/>
+</svg>

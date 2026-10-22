@@ -1,0 +1,12 @@
+[Unit]
+Description=Rotate the rEFInd theme for the next boot
+Documentation=https://github.com/adjmunro/refind
+RequiresMountsFor=/boot
+ConditionPathExists=/etc/refind-theme.conf
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/refind-theme rotate boot
+
+[Install]
+WantedBy=multi-user.target
