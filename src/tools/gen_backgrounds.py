@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Generate the procedural backgrounds in src/backgrounds/.
 
-    python3 src/tools/gen_backgrounds.py [synthwave] [automata] [magikarp]
+    python3 src/tools/gen_backgrounds.py [name ...]     (default: all in BACKGROUND_NAMES)
 
 All are composed around rEFInd's menu, which sits in the middle of the screen
 (icons around x=730-1190, y=430-700 at 1080p): the busy parts stay clear of it.
@@ -16,6 +16,8 @@ import subprocess
 import sys
 
 from PIL import Image, ImageChops, ImageDraw, ImageFilter, ImageFont
+
+from magikarp import carp
 
 OUT = pathlib.Path(__file__).resolve().parents[1] / "backgrounds"
 W, H = 1920, 1080
@@ -323,8 +325,216 @@ def magikarp():
     return img.resize((W, H), Image.LANCZOS)
 
 
+def caustics(size, seed, scale):
+    """Bright wandering lines like sunlight focused through ripples: where two smooth
+    noise fields cross. Returns an L image, 0 = dark, 255 = brightest line."""
+    w, h = size
+    small = (max(8, w // scale), max(8, h // scale))
+    a = Image.effect_noise(small, 80).filter(ImageFilter.GaussianBlur(2))
+    random.seed(seed)
+    b = Image.effect_noise(small, 80).rotate(90, expand=True).resize(small).filter(ImageFilter.GaussianBlur(2))
+    diff = ImageChops.difference(a, b).resize(size, Image.BICUBIC)
+    return diff.point(lambda v: max(0, 255 - v * 9))
+
+
+def deep_water(w, h):
+    """The water from magikarp(), shared by the underwater variants."""
+    img = vgradient((w, h), [(0, (38, 136, 200)), (0.12, (30, 120, 186)), (0.5, (16, 84, 140)),
+                             (0.85, (9, 50, 92)), (1, (6, 34, 64))])
+    rays = Image.new("L", (w, h), 0)
+    rd = ImageDraw.Draw(rays)
+    rnd = random.Random(5)
+    for _ in range(9):
+        x = rnd.uniform(-0.1, 1.0) * w
+        spread, lean = rnd.uniform(40, 110) * SS, rnd.uniform(120, 420) * SS
+        rd.polygon([(x, 0), (x + spread, 0), (x + spread * 3 + lean, h * 0.9), (x + lean, h * 0.9)], fill=rnd.randint(18, 40))
+    rays = rays.filter(ImageFilter.GaussianBlur(28 * SS))
+    img = Image.composite(Image.new("RGB", (w, h), (190, 235, 255)), img, rays)
+    surf = Image.new("RGB", (w, h))
+    sd = ImageDraw.Draw(surf)
+    for k, (amp, y0, col) in enumerate([(10, 34, (180, 230, 255)), (7, 58, (120, 200, 245)), (5, 80, (90, 175, 230))]):
+        pts = [(x, (y0 + amp * math.sin(x / (70 + 17 * k) / SS + k)) * SS) for x in range(0, w + 8, 8)]
+        sd.line(pts, fill=col, width=3 * SS)
+    return ImageChops.add(img, glow(surf, 6 * SS, 0.8).point(lambda v: round(v * 0.6)))
+
+
+def place(img, fish, x, y, shadow=(4, 22, 44), blur=24):
+    """Paste a fish with a soft shadow, x/y in output pixels."""
+    sh = Image.new("RGBA", fish.size, shadow + (0,))
+    sh.putalpha(fish.getchannel("A").filter(ImageFilter.GaussianBlur(blur * SS)).point(lambda v: v // 2))
+    img.paste(sh, (x + 18 * SS, y + 30 * SS), sh)
+    img.paste(fish, (x, y), fish)
+
+
+def magikarp_deep():
+    """The original water, a more faithful fish, and a soft, dim seabed instead of cartoon weed."""
+    w, h = W * SS, H * SS
+    img = deep_water(w, h)
+    # Kelp far away on both flanks: tall blades, blurred by distance.
+    kelp = Image.new("L", (w, h), 0)
+    kd = ImageDraw.Draw(kelp)
+    rnd = random.Random(21)
+    for _ in range(30):
+        x0 = rnd.choice([rnd.uniform(-0.02, 0.26), rnd.uniform(0.80, 1.02)]) * w
+        tall, sway, width = rnd.uniform(0.35, 0.75) * h, rnd.uniform(20, 60) * SS, rnd.uniform(10, 26) * SS
+        left = [(x0 + math.sin(t / tall * 3 + x0) * sway - width / 2 * (1 - t / tall), h - t) for t in range(0, int(tall), 10)]
+        right = [(x + width * (1 - (h - y) / tall), y) for x, y in reversed(left)]
+        kd.polygon(left + right, fill=rnd.randint(110, 200))
+    kelp = kelp.filter(ImageFilter.GaussianBlur(9 * SS))
+    img = Image.composite(Image.new("RGB", (w, h), (8, 52, 66)), img, kelp)
+    # Sand: a soft gradient rising gently at the edges, with rippled light across it.
+    floor = Image.new("L", (w, h), 0)
+    pts = [(0, h)] + [(x, h * 0.84 + (1 - math.sin(math.pi * x / w)) * -50 * SS + math.sin(x / (310 * SS)) * 14 * SS)
+                      for x in range(0, w + 16, 16)] + [(w, h)]
+    ImageDraw.Draw(floor).polygon(pts, fill=255)
+    floor = floor.filter(ImageFilter.GaussianBlur(14 * SS))
+    sand = vgradient((w, h), [(0, (50, 98, 112)), (0.82, (58, 108, 116)), (1, (26, 54, 66))])
+    img = Image.composite(sand, img, floor)
+    light = caustics((w, h), 3, 90).point(lambda v: v // 3)
+    img = Image.composite(Image.new("RGB", (w, h), (170, 225, 230)), img, ImageChops.multiply(light, floor))
+    # Drifting specks.
+    d = ImageDraw.Draw(img)
+    rnd = random.Random(8)
+    for _ in range(260):
+        x, y, r = rnd.uniform(0, w), rnd.uniform(0.1, 0.95) * h, rnd.choice([1, 1, 2]) * SS
+        if 0.36 * w < x < 0.64 * w and 0.36 * h < y < 0.70 * h:
+            continue
+        c = rnd.randint(130, 190)
+        d.ellipse([x - r, y - r, x + r, y + r], fill=(c, c + 30, c + 50))
+    fish = carp(560 * SS, "natural", -6)
+    place(img, fish, w - fish.width - 50 * SS, round(h * 0.18))
+    return img.resize((W, H), Image.LANCZOS)
+
+
+def magikarp_splash():
+    """Sunset: Magikarp leaps clear of the sea, all splash and no purpose."""
+    w, h = W * SS, H * SS
+    sea_y = round(h * 0.38)
+    img = vgradient((w, h), [(0, (70, 48, 120)), (0.2, (196, 86, 120)), (0.38, (255, 170, 96)),
+                             (0.381, (34, 92, 112)), (0.6, (18, 64, 92)), (1, (6, 30, 52))])
+    d = ImageDraw.Draw(img)
+    # Sun sinking at the horizon, and its broken reflection.
+    sx, sr = round(w * 0.22), round(h * 0.11)
+    sun = Image.new("RGB", (w, h))
+    ImageDraw.Draw(sun).ellipse([sx - sr, sea_y - sr, sx + sr, sea_y + sr], fill=(255, 214, 140))
+    sun.paste((0, 0, 0), (0, sea_y, w, h))
+    img = ImageChops.add(img, glow(sun, 40 * SS, 0.9))
+    d = ImageDraw.Draw(img)
+    rnd = random.Random(12)
+    for i in range(36):
+        y = sea_y + 6 * SS + i * 9 * SS
+        half = sr * (1.1 - i / 40) * rnd.uniform(0.4, 1.0)
+        x = sx + rnd.uniform(-0.3, 0.3) * sr
+        d.line([(x - half, y), (x + half, y)], fill=(255, 196, 120), width=max(2, round((4 - i / 12) * SS)))
+    # Gentle swell lines across the sea.
+    for i in range(1, 16):
+        y = sea_y + (i ** 1.6) * 6 * SS
+        pts = [(x, y + math.sin(x / (90 * SS) + i) * 3 * SS) for x in range(0, w + 10, 10)]
+        d.line(pts, fill=(60, 128, 146), width=SS * 2)
+    # The leap: fish high on the right, splash crown where it left the water.
+    fish = carp(320 * SS, "natural", -28)
+    fx, fy = w - fish.width - 150 * SS, max(16 * SS, sea_y - fish.height + 10 * SS)
+    cx = fx + round(fish.width * 0.80)
+    splash = Image.new("RGBA", (w, h), (0, 0, 0, 0))
+    spd = ImageDraw.Draw(splash)
+    for k in range(3):
+        rx, ry = (120 + k * 80) * SS, (14 + k * 7) * SS
+        spd.ellipse([cx - rx, sea_y - ry, cx + rx, sea_y + ry], outline=(220, 240, 245, 170 - k * 45), width=3 * SS)
+    for _ in range(40):
+        a = rnd.uniform(math.pi * 1.05, math.pi * 1.95)
+        dist = rnd.uniform(30, 190) * SS
+        x, y = cx + math.cos(a) * dist, sea_y + math.sin(a) * dist * 0.9
+        r = rnd.uniform(3, 9) * SS
+        spd.ellipse([x - r, y - r * 1.3, x + r, y + r * 1.3], fill=(235, 248, 250, 220))
+    spd.polygon([(cx - 90 * SS, sea_y), (cx - 40 * SS, sea_y - 120 * SS), (cx, sea_y - 40 * SS), (cx + 30 * SS, sea_y - 150 * SS),
+                 (cx + 70 * SS, sea_y - 50 * SS), (cx + 120 * SS, sea_y - 100 * SS), (cx + 110 * SS, sea_y)], fill=(230, 246, 250, 200))
+    img.paste(splash, (0, 0), splash)
+    img.paste(fish, (fx, fy), fish)
+    return img.resize((W, H), Image.LANCZOS)
+
+
+def magikarp_moon():
+    """Night: a silhouette mid-leap across an enormous moon, over still water."""
+    w, h = W * SS, H * SS
+    sea_y = round(h * 0.80)
+    img = vgradient((w, h), [(0, (6, 10, 30)), (0.6, (22, 30, 70)), (0.8, (40, 46, 96)),
+                             (0.801, (10, 16, 38)), (1, (4, 6, 18))])
+    d = ImageDraw.Draw(img)
+    rnd = random.Random(31)
+    for _ in range(700):
+        x, y = rnd.uniform(0, w), rnd.uniform(0, sea_y * 0.95)
+        b, r = rnd.randint(90, 230), rnd.choice([1, 1, 1, 2, 2, 3])
+        d.ellipse([x - r, y - r, x + r, y + r], fill=(b, b, min(255, b + 20)))
+    mx, my, mr = round(w * 0.76), round(h * 0.40), round(h * 0.27)
+    moon = Image.new("RGB", (w, h))
+    md = ImageDraw.Draw(moon)
+    md.ellipse([mx - mr, my - mr, mx + mr, my + mr], fill=(246, 238, 210))
+    for _ in range(14):    # faint maria
+        a, dist, r = rnd.uniform(0, 6.28), rnd.uniform(0, mr * 0.7), rnd.uniform(0.08, 0.22) * mr
+        x, y = mx + math.cos(a) * dist, my + math.sin(a) * dist
+        md.ellipse([x - r, y - r, x + r, y + r], fill=(226, 218, 192))
+    moon = moon.filter(ImageFilter.GaussianBlur(2 * SS))
+    halo = moon.filter(ImageFilter.GaussianBlur(70 * SS)).point(lambda v: round(v * 0.45))
+    img = ImageChops.add(img, halo)
+    d = ImageDraw.Draw(img)
+    mask = Image.new("L", (w, h), 0)
+    ImageDraw.Draw(mask).ellipse([mx - mr, my - mr, mx + mr, my + mr], fill=255)
+    img.paste(moon, (0, 0), mask)
+    # Moonlight on the water.
+    for i in range(40):
+        y = sea_y + 4 * SS + i * 5 * SS
+        half = mr * 0.7 * (1 - i / 48) * rnd.uniform(0.3, 1.0)
+        x = mx + rnd.uniform(-0.15, 0.15) * mr
+        d.line([(x - half, y), (x + half, y)], fill=(200, 196, 170), width=SS * 2)
+    fish = carp(520 * SS, "silhouette", -20)
+    tinted = Image.new("RGBA", fish.size, (8, 12, 30, 0))
+    tinted.putalpha(fish.getchannel("A"))
+    img.paste(tinted, (mx - fish.width // 2 + 20 * SS, my - fish.height // 2 - 10 * SS), tinted)
+    return img.resize((W, H), Image.LANCZOS)
+
+
+def magikarp_ukiyo():
+    """Woodblock print: indigo field, red sun, mist bands, seigaiha waves, a flat-coloured carp."""
+    w, h = W * SS, H * SS
+    indigo, deep, cream, red = (30, 44, 78), (20, 30, 58), (238, 226, 196), (196, 56, 44)
+    img = Image.new("RGB", (w, h), indigo)
+    d = ImageDraw.Draw(img)
+    sx, sy, sr = round(w * 0.19), round(h * 0.26), round(h * 0.15)
+    d.ellipse([sx - sr, sy - sr, sx + sr, sy + sr], fill=red)
+    # Kasumi mist bands, kept off the menu in the middle.
+    for x0, x1, y, t in [(0.0, 0.30, 0.32, 34), (0.08, 0.34, 0.40, 22), (0.55, 1.0, 0.10, 30), (0.70, 1.0, 0.16, 18)]:
+        d.rounded_rectangle([x0 * w, y * h, x1 * w, y * h + t * SS], radius=t * SS // 2, fill=cream)
+    # Seigaiha waves along the bottom: overlapping fans of concentric arcs, row by row.
+    r = 74 * SS
+    top = round(h * 0.76)
+    for row, y in enumerate(range(top, h + r, r // 2)):
+        for x in range(-r + (r if row % 2 else 0), w + r, 2 * r):
+            for k, rr in enumerate([r, r * 0.76, r * 0.52, r * 0.28]):
+                d.ellipse([x - rr, y - rr, x + rr, y + rr], fill=deep if k % 2 == 0 else indigo, outline=cream, width=3 * SS)
+    # The carp, leaping clear of the waves on the right.
+    fish = carp(500 * SS, "flat", -22)
+    img.paste(fish, (w - fish.width - 70 * SS, round(h * 0.20)), fish)
+    # Paper grain over everything.
+    grain = Image.effect_noise((w // 2, h // 2), 22).resize((w, h)).convert("RGB")
+    img = Image.blend(img, ImageChops.multiply(img, grain.point(lambda v: 200 + v // 5)), 0.6)
+    return img.resize((W, H), Image.LANCZOS)
+
+
+BACKGROUND_NAMES = {
+    "synthwave": synthwave, "automata": automata, "magikarp": magikarp,
+    "magikarp-deep": magikarp_deep, "magikarp-splash": magikarp_splash,
+    "magikarp-moon": magikarp_moon, "magikarp-ukiyo": magikarp_ukiyo,
+}
+
+
 if __name__ == "__main__":
+    import json
+    removed = set(json.loads((OUT.parent / "removed.json").read_text()).get("backgrounds", [])) \
+        if (OUT.parent / "removed.json").exists() else set()
     OUT.mkdir(parents=True, exist_ok=True)
-    for name in sys.argv[1:] or ["synthwave", "automata", "magikarp"]:
-        globals()[name]().save(OUT / f"{name}.png", optimize=True)
+    for name in sys.argv[1:] or [n for n in BACKGROUND_NAMES if n not in removed]:
+        if name in removed:
+            print(f"skipped {name}: deleted in the configurator (src/removed.json)")
+            continue
+        BACKGROUND_NAMES[name]().save(OUT / f"{name}.png", optimize=True)
         print(f"wrote src/backgrounds/{name}.png")

@@ -91,6 +91,18 @@ window.REFIND = {
     "automata": {
       "text": "black"
     },
+    "magikarp-deep": {
+      "text": "white"
+    },
+    "magikarp-moon": {
+      "text": "white"
+    },
+    "magikarp-splash": {
+      "text": "white"
+    },
+    "magikarp-ukiyo": {
+      "text": "white"
+    },
     "magikarp": {
       "text": "white"
     },

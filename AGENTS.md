@@ -63,6 +63,8 @@ approves the password prompt. Tell them.
 - `refind-esp-sync` runs as root on files from this repo. Keep it data-only:
   it must never execute anything from the repo, and must keep refusing symlinks,
   odd theme names and non-PNG theme files.
+- Deleted options are gone on purpose: respect `src/removed.json` (fetch and
+  generate scripts already skip its entries).
 - Don't edit `upstream/` (vendored originals) or generated files:
   `refind.conf`, `themes/`, `preview/data.js`, `preview/candidates/`,
   `preview/backgrounds/`, `docs/preview-*.jpg`, `src/candidates/`,
@@ -76,7 +78,8 @@ approves the password prompt. Tell them.
 | `src/build.py` | Builds `refind.conf` and `themes/*` from config. Theme palettes (`THEMES`) and the background library (`BACKGROUNDS`) live here. |
 | `src/refind.conf.in` | Template for `refind.conf` (`@TIMEOUT@`, `@DEFAULT@`). |
 | `entries.conf` | The boot entries. `{theme}` in icon paths becomes the active theme's name. |
-| `src/backgrounds/` | Generated backgrounds (`src/tools/gen_backgrounds.py`: synthwave, automata, magikarp). |
+| `src/backgrounds/` | Generated backgrounds (`src/tools/gen_backgrounds.py`: synthwave, automata, five magikarp scenes; the fish itself is `src/tools/magikarp.py`). |
+| `src/removed.json` | Icon candidates (`slot/id`) and backgrounds the user deleted in the configurator. Never re-add, fetch or generate anything listed here. |
 | `src/icons/`, `src/candidates/` | Our icon masters, and every candidate per slot (`src/tools/fetch_candidates.py`, provenance in `SOURCES.md`). |
 | `preview/index.html` | The configurator page. |
 | `src/serve.py` | Its server: static files + `/api/state` + `/api/save`. Binds the Tailscale IP only. |

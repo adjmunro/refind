@@ -127,6 +127,8 @@ def candidate_id(kind, pkg, path):
 
 
 def main():
+    removed_file = ROOT / "src" / "removed.json"
+    removed = set(json.loads(removed_file.read_text()).get("icons", [])) if removed_file.exists() else set()
     if OUT.exists():
         shutil.rmtree(OUT)
     rows, missing = [], []
@@ -134,6 +136,8 @@ def main():
         (OUT / slot).mkdir(parents=True)
         for kind, pkg, path in specs:
             cid = candidate_id(kind, pkg, path)
+            if f"{slot}/{cid}" in removed:
+                continue                      # deleted in the configurator
             if kind == "npm":
                 url = find(pkg, path)
                 if not url:

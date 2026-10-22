@@ -44,6 +44,10 @@ those names:
   nameserver and turn on *Override DNS servers*. Tailscale talks to those over
   DNS-over-HTTPS itself, and tailnet names then resolve everywhere.
 
+Hover an icon or background you'll never use and click ✕ to delete it for good:
+it's removed from the repo, listed in `src/removed.json` so it's never offered
+again, and committed and pushed. Whatever is selected or saved can't be deleted.
+
 In the page: arrow keys and Enter drive the simulated menu, 1–6 preview a theme,
 R simulates a reboot (with your rotation setting), H hides the settings panel.
 

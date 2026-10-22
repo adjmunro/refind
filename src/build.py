@@ -36,13 +36,23 @@ FONT_PX = 22
 # comes out the same visual size whatever padding its source had.
 FILL = {"os": 0.74, "func": 0.80}
 
-# Backgrounds anyone can pick for any theme: the upstream originals plus src/backgrounds/*.
-BACKGROUNDS = {
-    "minimal": ROOT / "upstream" / "rEFInd-minimal" / "background.png",
-    "ambience": ROOT / "upstream" / "refind-ambience" / "background.png",
-    "sublime": ROOT / "upstream" / "refind-sublime" / "background.png",
-    **{p.stem: p for p in sorted((SRC / "backgrounds").glob("*.png"))},
-}
+# Things deleted in the configurator: never offered, generated or fetched again.
+REMOVED = json.loads((SRC / "removed.json").read_text()) if (SRC / "removed.json").exists() else {}
+
+
+def background_sources():
+    """Backgrounds anyone can pick for any theme: the upstream originals plus
+    src/backgrounds/*, minus deleted ones."""
+    found = {
+        "minimal": ROOT / "upstream" / "rEFInd-minimal" / "background.png",
+        "ambience": ROOT / "upstream" / "refind-ambience" / "background.png",
+        "sublime": ROOT / "upstream" / "refind-sublime" / "background.png",
+        **{p.stem: p for p in sorted((SRC / "backgrounds").glob("*.png"))},
+    }
+    return {k: v for k, v in found.items() if v.exists() and k not in REMOVED.get("backgrounds", [])}
+
+
+BACKGROUNDS = background_sources()
 
 # Theme palettes. Our own SVGs (candidate id "own") use #ffffff for the glyph
 # colour and #999999 for the shade; every other candidate is single-tone and is
@@ -281,6 +291,9 @@ def build_refind_conf(cfg):
 
 def build_backgrounds():
     """Full-size JPEGs of every background, so the configurator can show any pairing."""
+    for stale in (PREVIEW / "backgrounds").glob("*.jpg"):
+        if stale.stem not in BACKGROUNDS:
+            stale.unlink()
     info = {}
     for bid, path in BACKGROUNDS.items():
         dest = PREVIEW / "backgrounds" / f"{bid}.jpg"

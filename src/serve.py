@@ -9,11 +9,15 @@ devices reach it at http://<tailnet name>:8765/ (port 80 is the magikarp home pa
     GET  /api/state   config, git state, and what's deployed to the ESP
     POST /api/save    {config}: write src/config.json, build, commit, push,
                       then start refind-esp-sync.service to update the ESP
+    POST /api/delete  {kind: icon|background, slot, id}: delete a candidate icon or
+                      background for good (src/removed.json), rebuild, commit, push
 """
 import argparse
 import http.server
+import importlib
 import json
 import pathlib
+import re
 import subprocess
 import sys
 import threading
@@ -92,6 +96,86 @@ def save(config):
     return steps
 
 
+def background_sources():
+    """Where each offered background comes from, as build.py sees it right now."""
+    sys.path.insert(0, str(ROOT / "src"))
+    import build
+    importlib.reload(build)
+    return build.background_sources()
+
+
+def delete(kind, slot, cid):
+    """Remove an icon candidate or background for good: delete its files, record it in
+    src/removed.json so it's never fetched or generated again, rebuild, commit, push.
+    Returns (http status, steps)."""
+    steps = []
+
+    def step(name, ok, detail=""):
+        steps.append({"step": name, "ok": ok, "detail": detail.strip()})
+        return ok
+
+    if not isinstance(cid, str) or not re.fullmatch(r"[\w.-]+", cid):
+        return 400, [{"step": "Check", "ok": False, "detail": "bad name"}]
+    cfg = json.loads(CONFIG.read_text())
+    paths = []
+    if kind == "icon":
+        if slot not in cfg["icons"]:
+            return 400, [{"step": "Check", "ok": False, "detail": f"unknown icon slot {slot!r}"}]
+        files = list((ROOT / "src" / "candidates" / slot).glob(f"{cid}.*"))
+        others = [p for p in (ROOT / "src" / "candidates" / slot).glob("*.*") if p.suffix in (".svg", ".png") and p.stem != cid]
+        if not files:
+            return 404, [{"step": "Check", "ok": False, "detail": f"no candidate {cid!r} for {slot}"}]
+        if cfg["icons"][slot] == cid:
+            return 409, [{"step": "Check", "ok": False, "detail": "it's the saved choice for this slot; pick another and save first"}]
+        if not others:
+            return 409, [{"step": "Check", "ok": False, "detail": "it's the last option for this slot"}]
+        paths += files + list((ROOT / "preview" / "candidates").glob(f"*/{slot}/{cid}.png"))
+        if cid == "own":
+            paths.append(ROOT / "src" / "icons" / f"{slot}.svg")
+        record, entry = "icons", f"{slot}/{cid}"
+    elif kind == "background":
+        sources = background_sources()
+        if cid not in sources:
+            return 404, [{"step": "Check", "ok": False, "detail": f"no background {cid!r}"}]
+        users = [t for t, v in cfg["themes"].items() if v["background"] == cid]
+        if users:
+            return 409, [{"step": "Check", "ok": False, "detail": f"in use by the saved {', '.join(users)} theme; change that and save first"}]
+        if len(sources) == 1:
+            return 409, [{"step": "Check", "ok": False, "detail": "it's the last background"}]
+        paths += [sources[cid], ROOT / "preview" / "backgrounds" / f"{cid}.jpg"]
+        record, entry = "backgrounds", cid
+    else:
+        return 400, [{"step": "Check", "ok": False, "detail": "kind must be icon or background"}]
+
+    pull = run("git", "pull", "--ff-only", "-q")
+    if not step("Sync with GitHub", pull.returncode == 0, pull.stderr):
+        return 200, steps
+    for p in paths:
+        p.unlink(missing_ok=True)
+    removed_file = ROOT / "src" / "removed.json"
+    removed = json.loads(removed_file.read_text()) if removed_file.exists() else {}
+    removed.setdefault("icons", []), removed.setdefault("backgrounds", [])
+    if entry not in removed[record]:
+        removed[record].append(entry)
+    removed_file.write_text(json.dumps(removed, indent=2) + "\n")
+    sources_md = ROOT / "src" / "candidates" / "SOURCES.md"
+    if kind == "icon" and sources_md.exists():
+        sources_md.write_text("".join(l for l in sources_md.read_text().splitlines(True)
+                                      if not l.startswith(f"| {slot} | `{cid}` |")))
+    step("Delete files", True, "\n".join(str(p.relative_to(ROOT)) for p in paths))
+    build = run(sys.executable, "src/build.py")
+    if not step("Rebuild", build.returncode == 0, build.stderr[-1500:]):
+        return 200, steps
+    run("git", "add", "-A", "--", "src", "preview", "upstream", "themes", "refind.conf", "docs")
+    commit = run("git", "commit", "-q", "-m", f"Delete {kind} {entry}",
+                 "-m", "Removed in the configurator; recorded in src/removed.json so it isn't offered again.")
+    if not step("Commit", commit.returncode == 0, commit.stderr):
+        return 200, steps
+    push = run("git", "push", "-q")
+    step("Push", push.returncode == 0, push.stderr)
+    return 200, steps
+
+
 def summary(cfg):
     rot = cfg["rotation"]
     lines = [f"rotation: {rot['mode']} over {', '.join(rot['themes'])}" if rot["mode"] != "off"
@@ -138,6 +222,8 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             super().do_GET()
 
     def do_POST(self):
+        if self.path == "/api/delete":
+            return self.do_delete()
         if self.path != "/api/save":
             return self.send_error(404)
         try:
@@ -151,6 +237,21 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             started = time.time()
             steps = save(config)
             self.reply(200, {"steps": steps, "ok": all(s["ok"] for s in steps), "seconds": round(time.time() - started, 1)})
+        finally:
+            LOCK.release()
+
+    def do_delete(self):
+        try:
+            body = json.loads(self.rfile.read(int(self.headers.get("Content-Length", 0))))
+            assert isinstance(body, dict)
+        except (ValueError, AssertionError):
+            return self.reply(400, {"error": "body must be {kind, slot?, id}"})
+        if not LOCK.acquire(blocking=False):
+            return self.reply(409, {"error": "a save or delete is already running"})
+        try:
+            status, steps = delete(body.get("kind"), body.get("slot"), body.get("id"))
+            ok = status == 200 and all(s["ok"] for s in steps)
+            self.reply(status, {"steps": steps, "ok": ok, "error": None if ok else steps[-1]["detail"]})
         finally:
             LOCK.release()
 

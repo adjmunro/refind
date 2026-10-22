@@ -68,6 +68,11 @@
   .cand.on { border: 2px solid var(--accent); background: rgb(76 194 255 / 0.12); }
   .cand img { max-width: 100%; max-height: 100%; }
   .slot { margin: 12px 0; } .slot .name { font: 11px ui-monospace, monospace; color: var(--muted); margin-top: 3px; }
+  .wrap { position: relative; display: grid; }
+  .del { position: absolute; top: 3px; right: 3px; width: 20px; height: 20px; padding: 0; border-radius: 50%; display: none;
+         font-size: 11px; line-height: 18px; text-align: center; background: rgb(0 0 0 / 0.7); border: 1px solid rgb(255 255 255 / 0.35); color: #fff; }
+  .del:hover { background: var(--bad); border-color: var(--bad); }
+  .wrap:hover .del { display: block; }
 
   #view { position: fixed; inset: 0 0 0 var(--w); overflow: hidden; }
   body.nopanel #view { left: 0; }
@@ -295,7 +300,7 @@ function renderPanel() {
       b.style.backgroundImage = `url(backgrounds/${bg}.jpg)`;
       b.title = bg;
       b.onclick = () => { cfg.themes[n].background = bg; view.theme = n; changed(); renderAll(); };
-      bgs.append(b);
+      bgs.append(withDelete(b, "background", null, bg));
     }
     box.append(bgs);
     themes.append(box);
@@ -332,7 +337,7 @@ function renderPanel() {
       b.onclick = () => { cfg.icons[slot] = id; changed(); renderAll(); };
       b.onmouseenter = () => name.textContent = id;
       b.onmouseleave = () => name.textContent = cfg.icons[slot];
-      grid.append(b);
+      grid.append(withDelete(b, "icon", slot, id));
     }
     wrap.append(grid, name);
     slots.append(wrap);
@@ -373,6 +378,51 @@ function renderStatus() {
   st.innerHTML = lines.map(l => `<div>${l}</div>`).join("");
   save.disabled = !(dirty() || pending);
   save.textContent = dirty() ? "Save & apply" : "Apply to boot menu";
+}
+
+/* ---------- deleting options for good ---------- */
+function inUse(kind, slot, id) {
+  const configs = [cfg, D.config];
+  if (kind === "icon") return configs.some(c => c.icons[slot] === id);
+  return configs.some(c => Object.values(c.themes).some(t => t.background === id));
+}
+
+// Wrap a tile with a hover ✕ that deletes the option from the repo (not for what's in use).
+function withDelete(tile, kind, slot, id) {
+  const wrap = document.createElement("div");
+  wrap.className = "wrap";
+  wrap.append(tile);
+  if (!server || inUse(kind, slot, id)) return wrap;
+  const x = document.createElement("button");
+  x.className = "del";
+  x.textContent = "✕";
+  x.title = `Delete ${id} for good`;
+  x.onclick = e => { e.stopPropagation(); remove(kind, slot, id); };
+  wrap.append(x);
+  return wrap;
+}
+
+let deleting = false;
+async function remove(kind, slot, id) {
+  if (deleting) return toast("Still deleting the last one…");
+  const what = kind === "icon" ? `the ${SLOT_TITLES[slot] || slot} icon "${id}"` : `the background "${id}"`;
+  if (!confirm(`Delete ${what} for good?\n\nIt's removed from the repo, committed and pushed, and won't be offered again.`)) return;
+  deleting = true;
+  toast(`Deleting ${id}…`);
+  try {
+    const r = await fetch("/api/delete", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ kind, slot, id }) });
+    const j = await r.json();
+    if (!j.ok) throw new Error(j.error || r.status);
+    if (kind === "icon") D.candidates[slot] = D.candidates[slot].filter(c => c !== id);
+    else delete D.backgrounds[id];
+    toast(`Deleted ${id} (committed and pushed)`);
+    server = await fetch("/api/state").then(r => r.json()).catch(() => server);
+    renderAll();
+  } catch (err) {
+    toast(`Couldn't delete ${id}: ${err.message}`);
+  } finally {
+    deleting = false;
+  }
 }
 
 function changed() { renderStatus(); }
@@ -460,7 +510,7 @@ addEventListener("beforeunload", e => { if (dirty() && $("modal").classList.cont
 fit();
 renderAll();
 if (location.protocol.startsWith("http")) {
-  fetch("/api/state").then(r => r.ok ? r.json() : null).then(s => { server = s; renderStatus(); }).catch(() => renderStatus());
+  fetch("/api/state").then(r => r.ok ? r.json() : null).then(s => { server = s; renderPanel(); }).catch(() => renderStatus());
 }
 </script>
 </body>
