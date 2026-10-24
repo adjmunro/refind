@@ -5,6 +5,9 @@
 #   sudo scripts/deploy.sh --dry-run    checks every boot entry, shows what would change
 #   sudo scripts/deploy.sh [--force]    deploy (--force allows uncommitted changes)
 #
+# If efi/ changed, run efi/build.sh as yourself first: the system parts include
+# our rEFInd, and this won't build it as root.
+#
 # Never reboots or restarts anything; the result shows on the next boot.
 set -euo pipefail
 

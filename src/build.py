@@ -286,7 +286,12 @@ def build_theme(name, spec, cfg):
 def build_refind_conf(cfg):
     text = (SRC / "refind.conf.in").read_text()
     text = text.replace("@TIMEOUT@", str(cfg["boot"]["timeout"])).replace("@DEFAULT@", cfg["boot"]["default"])
-    (ROOT / "refind.conf").write_text(text)
+    rot = cfg["rotation"]
+    rotation = ""
+    if rot["mode"] != "off":
+        # refind-esp-sync has refind-theme compose rotation/<name>.conf on the ESP.
+        rotation = f"theme_rotate {rot['mode']} " + " ".join(f"rotation/{t}.conf" for t in rot["themes"]) + "\n"
+    (ROOT / "refind.conf").write_text(text.replace("@ROTATION@", rotation))
 
 
 def build_backgrounds():

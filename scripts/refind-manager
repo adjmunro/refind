@@ -42,13 +42,16 @@ gio set -t string "$REPO/rEFInd Manager.desktop" metadata::xfce-exe-checksum \
 
 # 2. System parts (root): needed for Save to update the boot menu.
 if [[ $(scripts/system-version.sh) != "$(cat /usr/local/lib/refind-manager/VERSION 2>/dev/null)" ]]; then
-    if [[ -n ${DISPLAY:-}${WAYLAND_DISPLAY:-} ]] && command -v pkexec >/dev/null; then
+    if ! efi/build.sh; then
+        say "Couldn't build our rEFInd (efi/build.sh); system setup skipped."
+    elif [[ -n ${DISPLAY:-}${WAYLAND_DISPLAY:-} ]] && command -v pkexec >/dev/null; then
         zenity --info --no-wrap --title "rEFInd Manager" --text \
 "Setup needs your password (first run, or after an update to it).
 
 It installs a small root service that copies this repo's boot menu onto
 the EFI partition, lets your user start that one service without a
-password so Save can update the boot menu.
+password so Save can update the boot menu, and installs our build of
+rEFInd (plain labels, theme rotation on every start).
 
 Details: scripts/install-system.sh" 2>/dev/null || true
         if pkexec "$REPO/scripts/install-system.sh"; then

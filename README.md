@@ -58,12 +58,20 @@ R simulates a reboot (with your rotation setting), H hides the settings panel.
 `/boot/EFI/refind`, plus a polkit rule that lets your user start **that one
 service** without a password. The service only copies config text and PNGs,
 checks every boot entry exists, refuses symlinks, and never runs code from the
-repo. Remove it all with `sudo scripts/install-system.sh --uninstall`.
+repo.
+
+It also replaces `/boot/EFI/refind/refind_x64.efi` with our build of rEFInd
+(`efi/`, built from source by `efi/build.sh` as your user): the same 0.14.2
+with plain labels (CachyOS, Windows, Linux Mint, Shutdown, Reboot, BIOS) and a
+theme that rotates every time the menu appears. The original is kept as
+`refind_x64.efi.stock`. Remove it all, and put the stock rEFInd back, with
+`sudo scripts/install-system.sh --uninstall`.
 
 ## If something goes wrong
 
 - Undo the boot menu: `sudo cp /boot/EFI/refind/refind.conf.pre-repo /boot/EFI/refind/refind.conf`.
-- If rEFInd won't come up, pick **Limine** from the firmware boot menu to reach CachyOS.
+- If rEFInd won't come up, pick **Limine** from the firmware boot menu to reach CachyOS,
+  then put the stock rEFInd back: `sudo cp /boot/EFI/refind/refind_x64.efi.stock /boot/EFI/refind/refind_x64.efi`.
 - Terminal route for deploying: `sudo scripts/deploy.sh --dry-run`, then `sudo scripts/deploy.sh`.
 - Server logs: `journalctl --user -u refind-manager`. Last deploy log: `/var/lib/refind-manager/last-sync.log`.
 

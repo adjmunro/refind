@@ -12,7 +12,9 @@
 # (theme.conf + PNGs; symlinks and anything else are skipped). Refuses to deploy
 # a menu entry whose loader is missing, a dirty working tree (unless --force),
 # and theme names that aren't plain [a-z0-9-]. Writes rotation.conf for
-# refind-theme, re-picks the active theme, and records the deployed commit.
+# refind-theme, has it compose rotation/<name>.conf (what refind.conf's
+# theme_rotate line picks from), re-picks the fixed theme, and records the
+# deployed commit.
 # Never reboots or restarts anything.
 set -euo pipefail
 
@@ -132,10 +134,13 @@ printf '%s\n' "${THEME_DIRS[@]}" > "$DEST/themes/.managed"
 printf 'MODE=%s\nTHEMES=%s\n' "$MODE" "$POOL" > "$DEST/rotation.conf"
 echo "• copied config and themes: ${THEME_DIRS[*]}"
 
-# Active theme: the fixed one when rotation is off; otherwise keep the current
-# theme if it's still in the pool, else shuffle into the pool.
+# Fixed theme (active-theme.conf): the configured one when rotation is off;
+# otherwise, for a stock rEFInd, keep the current theme if it's still in the
+# pool, else shuffle into the pool.
 export REFIND_DIR=$DEST STATE_DIR=$STATE
 mkdir -p "$STATE"
+cp "$DEST/rotation.conf" "$STATE/rotation"
+refind-theme rotation
 current=$(refind-theme current 2>/dev/null || true)
 if [[ $MODE == off ]]; then
     refind-theme set "$THEME"

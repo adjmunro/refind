@@ -54,10 +54,10 @@ The exact list needs root to read both ESPs. Run
 | **Windows** | `bootmgfw.efi` on the Windows ESP | Straight into Windows. |
 | **Linux Mint** | `shimx64.efi` on the Windows ESP → GRUB | See below for skipping GRUB. |
 
-Tools row: **power off**, **restart**, **firmware setup**. rEFInd labels the
-last one "Reboot to Computer Setup Utility". It reboots into the UEFI firmware
-setup, which is what everyone calls the BIOS. That wording is built into
-rEFInd's binary, not the config, so it can't be renamed without rebuilding rEFInd.
+Tools row: **power off**, **restart**, **firmware setup**, labelled Shutdown,
+Reboot and BIOS. Stock rEFInd builds its labels into the binary ("Boot CachyOS
+from EFI", "Reboot to Computer Setup Utility"), so ours is rebuilt with plain
+ones; see `efi/`.
 
 ## Mint: GRUB or not?
 

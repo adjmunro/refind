@@ -38,7 +38,7 @@ window.REFIND = {
       "default": "CachyOS"
     },
     "rotation": {
-      "mode": "random",
+      "mode": "next",
       "themes": [
         "minimal",
         "ambience",

@@ -1,22 +1,26 @@
 #!/usr/bin/env bash
 # refind-theme: show or switch the rEFInd theme on the ESP.
 #
-#   refind-theme status            active theme, rotation mode and pool
-#   refind-theme list              themes installed on the ESP (* = active)
-#   refind-theme set <name>        make <name> active from the next boot
-#   refind-theme next | random     step through / shuffle the rotation pool
-#   refind-theme boot              what refind-theme-rotate.service runs each boot
+#   refind-theme status            fixed theme, rotation mode and pool, last shown
+#   refind-theme list              themes installed on the ESP (* = fixed theme)
+#   refind-theme set <name>        make <name> the fixed theme
+#   refind-theme next | random     step through / shuffle the fixed theme
+#   refind-theme rotation          write rotation/<name>.conf for every theme
 #
 # Rotation mode and pool come from rotation.conf on the ESP, which refind-esp-sync
 # writes from the repo's src/config.json; change them in the configurator, not here.
-# The active theme is whatever active-theme.conf (included by refind.conf) was
-# composed from: themes/<name>/theme.conf plus entries.conf, with {theme} in icon
-# paths replaced by <name>. Installed to /usr/local/bin by scripts/install-system.sh.
+# Rotating is done by our rEFInd (efi/) each time it starts: refind.conf's
+# theme_rotate line picks one of rotation/<name>.conf. The fixed theme is
+# active-theme.conf, used when rotation is off and by a stock rEFInd. Each file
+# is themes/<name>/theme.conf plus entries.conf, with {theme} in icon paths
+# replaced by <name>. Installed to /usr/local/bin by scripts/install-system.sh.
 set -euo pipefail
 
 REFIND_DIR=${REFIND_DIR:-/boot/EFI/refind}
 STATE_DIR=${STATE_DIR:-/var/lib/refind-manager}
 ACTIVE=$REFIND_DIR/active-theme.conf
+# rEFInd's vendor GUID; our rEFInd keeps its last theme_rotate pick in ThemeRotation.
+LAST_PICK=/sys/firmware/efi/efivars/ThemeRotation-36d08fa7-cf0b-42f5-8f14-68df73ed3740
 MODE=off
 THEMES=
 
@@ -42,25 +46,56 @@ current() {
     sed -n 's/^# Active theme: \([^ ]*\).*/\1/p' "$ACTIVE" | head -n1
 }
 
+# The theme rEFInd showed on its last start, from its ThemeRotation variable
+# (4 attribute bytes, then the index into refind.conf's theme_rotate list).
+last_shown() {
+    local i
+    [[ -r $LAST_PICK && $MODE != off ]] || return 1
+    i=$(od -An -tu1 -j4 -N1 "$LAST_PICK" | tr -d ' ')
+    [[ $i =~ ^[0-9]+$ ]] || return 1
+    sed -n 's/^theme_rotate[[:space:]]\+[a-z]\+[[:space:]]\+//p' "$REFIND_DIR/refind.conf" \
+        | tr -s ' \t' '\n' | sed -n "$((i + 1))s|^rotation/\(.*\)\.conf$|\1|p" | grep .
+}
+
+# compose <name> <header>: a theme's styling plus the boot entries, to stdout.
+compose() {
+    [[ -f $REFIND_DIR/themes/$1/theme.conf ]] || die "no such theme: $1 (have: $(installed | tr '\n' ' '))"
+    [[ -f $REFIND_DIR/entries.conf ]] || die "missing $REFIND_DIR/entries.conf; deploy first"
+    echo "# $2"
+    echo "# Written by refind-theme on $(date -Is). Do not edit."
+    echo
+    cat "$REFIND_DIR/themes/$1/theme.conf"
+    echo
+    sed "s/{theme}/$1/g" "$REFIND_DIR/entries.conf"
+}
+
 set_theme() {
     local name=$1 tmp=$ACTIVE.tmp
     need_root
-    [[ -f $REFIND_DIR/themes/$name/theme.conf ]] || die "no such theme: $name (have: $(installed | tr '\n' ' '))"
-    [[ -f $REFIND_DIR/entries.conf ]] || die "missing $REFIND_DIR/entries.conf; deploy first"
-    {
-        echo "# Active theme: $name"
-        echo "# Written by refind-theme on $(date -Is). Do not edit."
-        echo
-        cat "$REFIND_DIR/themes/$name/theme.conf"
-        echo
-        sed "s/{theme}/$name/g" "$REFIND_DIR/entries.conf"
-    } > "$tmp"
+    compose "$name" "Active theme: $name" > "$tmp"
     mv -f "$tmp" "$ACTIVE"
     sync -f "$ACTIVE"
     if [[ -d $STATE_DIR ]]; then
         printf '%s\n' "$name" > "$STATE_DIR/active"
     fi
     echo "rEFInd theme: $name"
+}
+
+write_rotation() {
+    local dir=$REFIND_DIR/rotation f t
+    need_root
+    mkdir -p "$dir"
+    for f in "$dir"/*.conf; do
+        [[ -e $f ]] || continue
+        t=$(basename "$f" .conf)
+        [[ -f $REFIND_DIR/themes/$t/theme.conf ]] || rm -f "$f"
+    done
+    for t in $(installed); do
+        compose "$t" "Theme: $t" > "$dir/$t.conf.tmp"
+        mv -f "$dir/$t.conf.tmp" "$dir/$t.conf"
+    done
+    sync -f "$dir"
+    echo "rotation files: $(installed | tr '\n' ' ')"
 }
 
 pick_next() {
@@ -92,9 +127,10 @@ fi
 
 case ${1:-} in
     status)
-        echo "active:   $(current || echo none)"
-        echo "rotation: ${MODE:-off}"
-        echo "pool:     $(pool | tr '\n' ' ')"
+        echo "fixed:      $(current || echo none)"
+        echo "rotation:   ${MODE:-off}"
+        echo "pool:       $(pool | tr '\n' ' ')"
+        echo "last shown: $(last_shown || echo unknown)"
         ;;
     list)
         cur=$(current || true)
@@ -102,16 +138,10 @@ case ${1:-} in
             [[ $t == "$cur" ]] && echo "* $t" || echo "  $t"
         done
         ;;
-    current) current || die "no active theme yet" ;;
-    set)     [[ -n ${2:-} ]] || die "usage: refind-theme set <name>"; set_theme "$2" ;;
-    next)    set_theme "$(pick_next)" ;;
-    random)  set_theme "$(pick_random)" ;;
-    boot)
-        case $MODE in
-            next)   set_theme "$(pick_next)" ;;
-            random) set_theme "$(pick_random)" ;;
-            *)      echo "rotation off; staying on $(current || echo none)" ;;
-        esac
-        ;;
+    current)  current || die "no active theme yet" ;;
+    set)      [[ -n ${2:-} ]] || die "usage: refind-theme set <name>"; set_theme "$2" ;;
+    next)     set_theme "$(pick_next)" ;;
+    random)   set_theme "$(pick_random)" ;;
+    rotation) write_rotation ;;
     *)  sed -n '2,10s/^# \{0,1\}//p' "$0"; exit 2 ;;
 esac

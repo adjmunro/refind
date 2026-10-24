@@ -48,9 +48,10 @@ branches, no PRs.
    commit the regenerated files with it.
 3. **After every change:** commit with a clear message and `git push`.
 
-If you change `system/` or `bin/refind-theme`, the root-installed copies are
-stale until the user next opens rEFInd Manager on magikarp's desktop and
-approves the password prompt. Tell them.
+If you change `system/`, `bin/refind-theme` or `efi/`, the root-installed copies
+(and our rEFInd on the ESP) are stale until the user next opens rEFInd Manager
+on magikarp's desktop and approves the password prompt. Tell them. After an
+`efi/` change, run `efi/build.sh` yourself so the launcher has nothing to build.
 
 ## Hard rules
 
@@ -77,7 +78,8 @@ approves the password prompt. Tell them.
 |---|---|
 | `src/config.json` | **The settings**: icon picks, each theme's background, rotation (mode + pool), fixed theme, boot timeout/default. The configurator edits this. |
 | `src/build.py` | Builds `refind.conf` and `themes/*` from config. Theme palettes (`THEMES`) and the background library (`BACKGROUNDS`) live here. |
-| `src/refind.conf.in` | Template for `refind.conf` (`@TIMEOUT@`, `@DEFAULT@`). |
+| `src/refind.conf.in` | Template for `refind.conf` (`@TIMEOUT@`, `@DEFAULT@`, `@ROTATION@`). |
+| `efi/refind-magikarp.patch`, `efi/build.sh` | Our rEFInd: upstream 0.14.2 with plain labels ("CachyOS", "Shutdown", "Reboot", "BIOS"), a `showtools` that really replaces the default list, and `theme_rotate`. `efi/build.sh` builds it (with its own gnu-efi) into `efi/build/` (ignored by git); `install-system.sh` installs it. |
 | `entries.conf` | The boot entries. `{theme}` in icon paths becomes the active theme's name. |
 | `src/backgrounds/` | Generated backgrounds (`src/tools/gen_backgrounds.py`: synthwave, automata, five magikarp scenes; the fish itself is `src/tools/magikarp.py`). |
 | `src/removed.json` | Icon candidates (`slot/id`) and backgrounds the user deleted in the configurator. Never re-add, fetch or generate anything listed here. |
@@ -85,20 +87,30 @@ approves the password prompt. Tell them.
 | `preview/index.html` | The configurator page. |
 | `src/serve.py` | Its server: static files + `/api/state` + `/api/save`. Binds the Tailscale IP only. |
 | `scripts/refind-manager`, `rEFInd Manager.desktop` | The launcher. Runs the server as user unit `refind-manager`. |
-| `scripts/install-system.sh` | Root setup (via pkexec): installs `system/*` and `bin/refind-theme`, the polkit rule, `/etc/refind-manager.conf`. `--uninstall` removes it. |
+| `scripts/install-system.sh` | Root setup (via pkexec): installs `system/*`, `bin/refind-theme`, the polkit rule, `/etc/refind-manager.conf` and our rEFInd (the original stays as `refind_x64.efi.stock`). `--uninstall` removes it and puts the stock rEFInd back. |
 | `system/refind-esp-sync` (+ `.service`) | Root, data-only copy of the build onto the ESP. Polkit lets the repo owner start just this unit without a password. |
-| `system/refind-theme-rotate.service`, `bin/refind-theme` | Each CachyOS boot, applies the rotation mode from `rotation.conf` on the ESP. |
+| `bin/refind-theme` | Composes `rotation/<name>.conf` and `active-theme.conf` on the ESP; `status` shows the rotation and what rEFInd showed last. |
 | `scripts/deploy.sh` | Terminal route for the same deploy (`sudo scripts/deploy.sh [--dry-run]`). |
 | `scripts/inventory.sh` | Read-only report of everything bootable (root). Output: `docs/inventory.md`. |
 | `docs/boot-entries.md` | What rEFInd can boot on this machine and why the menu is shaped this way. |
 
 ## How theming works
 
-rEFInd only allows one level of `include`, so `refind-theme` composes
-`active-theme.conf` on the ESP from `themes/<name>/theme.conf` + `entries.conf`
-(with `{theme}` substituted). Switching theme rewrites that one small file.
-`refind-esp-sync` writes `rotation.conf` (`MODE=off|next|random`, `THEMES=...`)
-and picks the active theme; `refind-theme-rotate.service` advances it each boot.
+rEFInd only allows one level of `include`, so `refind-theme` composes one file
+per theme on the ESP, `rotation/<name>.conf`, from `themes/<name>/theme.conf` +
+`entries.conf` (with `{theme}` substituted), plus `active-theme.conf` for the
+fixed theme. With rotation on, `refind.conf` has
+`theme_rotate next|random rotation/<a>.conf rotation/<b>.conf ...` before
+`include active-theme.conf`: our rEFInd picks one of those files every time it
+starts (so a restart from rEFInd's own menu rotates too), remembers the pick in
+its `ThemeRotation` EFI variable, and skips the include. A stock rEFInd ignores
+`theme_rotate` and shows the fixed theme. `refind-esp-sync` writes
+`rotation.conf` (`MODE=off|next|random`, `THEMES=...`), has `refind-theme`
+compose the files, and picks the fixed theme.
+
+Stock CachyOS rEFInd doesn't clear its default tool list when `showtools` is
+set, so `refind.conf` pads `showtools` with `csr_rotate` (a Mac-only tool that
+shows nothing) to overwrite the leftovers. Our rEFInd doesn't need it.
 
 ## Icon and background rules
 

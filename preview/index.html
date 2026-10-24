@@ -126,7 +126,7 @@
       </div>
       <div class="field" id="fixedRow"><label for="fixed">Theme</label><select id="fixed"></select></div>
       <div id="poolRow"><p class="hint" style="margin:6px 0 8px">Themes in the rotation:</p><div class="chips" id="pool"></div></div>
-      <p class="hint">Rotation happens when CachyOS starts up, ready for the next boot.</p>
+      <p class="hint">The theme changes every time the boot menu appears, including after Reboot from the menu itself.</p>
     </details>
     <details open>
       <summary>Themes &amp; backgrounds</summary>
@@ -154,9 +154,9 @@ const D = window.REFIND;
 const $ = id => document.getElementById(id);
 const clone = o => JSON.parse(JSON.stringify(o));
 const TOOLS = [
-  { slot: "func_shutdown", title: "Shut Down Computer", action: "power off" },
-  { slot: "func_reset", title: "Reboot Computer", action: "restart" },
-  { slot: "func_firmware", title: "Reboot to Computer Setup Utility", action: "restart into the UEFI firmware setup (\"BIOS\")" },
+  { slot: "func_shutdown", title: "Shutdown", action: "power off" },
+  { slot: "func_reset", title: "Reboot", action: "restart" },
+  { slot: "func_firmware", title: "BIOS", action: "restart into the UEFI firmware setup (\"BIOS\")" },
 ];
 const SLOT_TITLES = { os_cachyos: "CachyOS", os_win: "Windows", os_mint: "Linux Mint",
   func_shutdown: "Power off", func_reset: "Restart", func_firmware: "Firmware (BIOS)" };

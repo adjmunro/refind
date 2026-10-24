@@ -28,6 +28,7 @@ ROOT = pathlib.Path(__file__).resolve().parents[1]
 CONFIG = ROOT / "src" / "config.json"
 STATE = pathlib.Path("/var/lib/refind-manager")
 VERSION = pathlib.Path("/usr/local/lib/refind-manager/VERSION")
+LAST_PICK = pathlib.Path("/sys/firmware/efi/efivars/ThemeRotation-36d08fa7-cf0b-42f5-8f14-68df73ed3740")
 GENERATED = ["src/config.json", "refind.conf", "themes", "preview", "docs"]
 LOCK = threading.Lock()
 
@@ -52,11 +53,25 @@ def read(path):
         return None
 
 
+def next_theme():
+    """The theme the next boot shows, or None when rotation is random. Our rEFInd
+    keeps the index of its last pick from the deployed pool in ThemeRotation."""
+    rotation = dict(line.split("=", 1) for line in (read(STATE / "rotation") or "").splitlines() if "=" in line)
+    mode, pool = rotation.get("MODE", "off"), rotation.get("THEMES", "").split()
+    try:
+        last = (LAST_PICK.read_bytes()[4:5] or b"\0")[0]
+    except OSError:
+        last = None
+    if mode == "off" or not pool or last is None:
+        return read(STATE / "active")
+    return pool[(last + 1) % len(pool)] if mode == "next" else None
+
+
 def system_state():
     want = run("scripts/system-version.sh").stdout.strip()
     have = read(VERSION)
     return {"installed": have is not None, "current": have == want,
-            "deployed": read(STATE / "deployed"), "active": read(STATE / "active")}
+            "deployed": read(STATE / "deployed"), "active": next_theme()}
 
 
 def git_state():
