@@ -139,7 +139,7 @@ echo "• copied config and themes: ${THEME_DIRS[*]}"
 # pool, else shuffle into the pool.
 export REFIND_DIR=$DEST STATE_DIR=$STATE
 mkdir -p "$STATE"
-cp "$DEST/rotation.conf" "$STATE/rotation"
+install -m 0644 "$DEST/rotation.conf" "$STATE/rotation"   # the ESP makes everything 0700
 refind-theme rotation
 current=$(refind-theme current 2>/dev/null || true)
 if [[ $MODE == off ]]; then
